@@ -1,0 +1,83 @@
+workflows:
+  default:
+    description: 默认工作流，仅做摘要
+    steps:
+      - tool: summarize_text
+
+  email_spam:
+    description: 垃圾邮件 → 归档
+    steps:
+      - tool: classify_email
+      - tool: write_db
+
+  email_support:
+    description: 客服邮件 → 摘要 + 抽单 + 生成回复
+    steps:
+      - tool: summarize_text
+      - tool: extract_ticket
+      - tool: draft_reply
+      - tool: write_db
+        condition: "urgency == 'high'"
+
+  review_negative:
+    description: 负面评价 → 情感抽取 + 告警
+    steps:
+      - tool: sentiment_aspect
+      - tool: alert_ops
+      - tool: write_db
+
+  news_finance:
+    description: 财经新闻 → 摘要 + 实体抽取
+    steps:
+      - tool: summarize_text
+      - tool: translate_text
+        with:
+          target_lang: 英文
+          style: formal
+      - tool: extract_entities
+
+  translate_only:
+    description: 纯翻译工作流
+    steps:
+      - tool: translate_text
+        with:
+          target_lang: 英文
+          style: formal
+
+  translate_summary:
+    description: 先摘要再翻译
+    steps:
+      - tool: summarize_and_translate
+
+  travel_tagging:
+    description: 旅游产品行程 → 字段抽取 + 标签生成 + 归一化 + 汇总
+    steps:
+      - tool: extract_itinerary_fields
+      - tool: generate_travel_tags
+      - tool: normalize_tags
+      - tool: render_tag_summary
+
+  text_correction:
+    description: 文本纠错 + 安全校验
+    steps:
+      - tool: correct_text
+      - tool: verify_correction
+
+  excel_nl_ops:
+    description: 自然语言操作 Excel（描述 → 计划 → 执行 → 回答）
+    steps:
+      - tool: excel_describe
+      - tool: excel_plan
+      - tool: excel_execute
+      - tool: excel_answer
+
+  doc_qa:
+    description: 基于本地知识库的 RAG 问答
+    steps:
+      - tool: rag_answer
+
+  doc_ingest_and_qa:
+    description: 上传文档并立即问答
+    steps:
+      - tool: rag_ingest
+      - tool: rag_answer
