@@ -1014,3 +1014,492 @@ async def rag_answer_v2(inputs: dict) -> dict:
     picked = all_chunks[: top_k * 2]
 
     return await rag._answer_with_chunks(question, picked, extra={"rewritten": queries})
+
+
+# =====================================================================
+# 以下为 TASKS.md 扩展工具（阶段一：内容创作类）
+# =====================================================================
+
+def _tool_text(inputs, *default_keys, limit=4000):
+    """通用输入解析：优先 with 指定的 input_from，否则按 default_keys 取首个非空值。
+    自动解包：字符串数组取首项、dict 取常见文本字段、chunks(list[dict]) 拼接全部 text。
+    """
+    src = inputs.get("input_from")
+    keys = (src,) + default_keys if src else default_keys
+    for k in keys:
+        v = inputs.get(k)
+        if not v:
+            continue
+        if isinstance(v, list) and v and all(isinstance(x, dict) and "text" in x for x in v):
+            v = "\n\n".join(str(x.get("text") or "") for x in v)
+        for _ in range(3):
+            if isinstance(v, list):
+                v = v[0] if v else ""
+            elif isinstance(v, dict):
+                v = (v.get("text") or v.get("summary") or v.get("content")
+                     or v.get("answer") or v.get("corrected") or v.get("polished")
+                     or v.get("expanded") or v.get("rewritten") or v.get("explanation")
+                     or "")
+            else:
+                break
+        if isinstance(v, (str, int, float)) and str(v).strip():
+            return str(v).strip()[:limit]
+    return ""
+
+
+@register(
+    name="polish_copy",
+    description="文案润色大师：把平淡文本润色成指定风格（小红书/公文/朋友圈/商务）",
+    input_schema={"text": "string", "style": "string 可选，默认小红书风"},
+    output_schema={"polished": "string", "style": "string", "tips": "array"},
+)
+async def polish_copy(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text")
+    if not text:
+        return {"polished": "", "style": "", "tips": []}
+    style = inputs.get("style") or "小红书风"
+    prompt = f"""你是文案润色专家。请把下面的文本润色成「{style}」。
+要求：保留原意与全部事实，不编造、不改动数字与专名；只优化表达；输出 JSON。
+{{"polished":"润色后的文本","tips":["可选改进建议"]}}
+
+原文：
+{text}"""
+    raw = await chat(prompt, system="你是文案润色专家，只输出 JSON。", json_mode=True, temperature=0.4)
+    data = _safe_json(raw, {"polished": text, "tips": []})
+    return {
+        "polished": data.get("polished") or text,
+        "style": style,
+        "tips": data.get("tips") or [],
+    }
+
+
+@register(
+    name="generate_hooks",
+    description="爆款标题生成器：为文章/摘要生成多个吸引眼球的标题",
+    input_schema={"text": "string", "count": "number 可选，默认5", "tone": "string 可选 悬念|干货|情绪"},
+    output_schema={"hooks": "array", "count": "number"},
+)
+async def generate_hooks(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text")
+    if not text:
+        return {"hooks": [], "count": 0}
+    try:
+        count = max(1, min(10, int(inputs.get("count", 5))))
+    except (TypeError, ValueError):
+        count = 5
+    tone = inputs.get("tone") or "干货"
+    prompt = f"""你是标题创作专家。为下面内容生成 {count} 个「{tone}」风格标题。
+要求：每个不超过20字、角度互不相同；不用"震惊/速看"等低俗词；不夸大事实。
+只输出 JSON: {{"hooks":["标题1","标题2"]}}
+
+内容：
+{text}"""
+    raw = await chat(prompt, system="你是标题创作助手，只输出 JSON。", json_mode=True, temperature=0.6)
+    data = _safe_json(raw, {"hooks": []})
+    hooks = [h for h in (data.get("hooks") or []) if isinstance(h, str) and h.strip()][:count]
+    return {"hooks": hooks, "count": len(hooks)}
+
+
+@register(
+    name="rewrite_style",
+    description="风格迁移器：用指定风格改写文本（鲁迅风/莎士比亚风/说给5岁小孩听等）",
+    input_schema={"text": "string", "style": "string 可选，默认鲁迅风"},
+    output_schema={"rewritten": "string"},
+)
+async def rewrite_style(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text")
+    if not text:
+        return {"rewritten": ""}
+    style = inputs.get("style") or "鲁迅风"
+    prompt = f"""你是文字风格大师。把下面的文本改写成「{style}」。
+要求：保留全部核心信息与事实，只改表达方式；不加解释、不加引号。
+只输出 JSON: {{"rewritten":"改写后的文本"}}
+
+原文：
+{text}"""
+    raw = await chat(prompt, system="你是风格改写助手，只输出 JSON。", json_mode=True, temperature=0.5)
+    data = _safe_json(raw, {"rewritten": text})
+    return {"rewritten": data.get("rewritten") or text}
+
+
+@register(
+    name="expand_article",
+    description="内容扩写器：把一句话/要点扩写成完整段落或文章大纲",
+    input_schema={"text": "string", "target_length": "number 可选，默认300", "format": "string paragraph|outline"},
+    output_schema={"expanded": "string"},
+)
+async def expand_article(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text")
+    if not text:
+        return {"expanded": ""}
+    try:
+        target = max(50, min(2000, int(inputs.get("target_length", 300))))
+    except (TypeError, ValueError):
+        target = 300
+    fmt = inputs.get("format") or "paragraph"
+    shape = "分层的Markdown大纲" if fmt == "outline" else "连贯完整的段落"
+    prompt = f"""你是内容扩写专家。把下面要点扩写成约 {target} 字的{shape}。
+要求：围绕原要点合理展开，不编造事实数据；结构清晰，不灌水不重复。
+只输出 JSON: {{"expanded":"扩写后的内容"}}
+
+要点：
+{text}"""
+    raw = await chat(prompt, system="你是内容扩写助手，只输出 JSON。", json_mode=True, temperature=0.5)
+    data = _safe_json(raw, {"expanded": text})
+    return {"expanded": data.get("expanded") or text}
+
+
+# ---------------------------------------------------------------------
+# 阶段二：办公效率类工具
+# ---------------------------------------------------------------------
+
+@register(
+    name="meeting_notes",
+    description="会议纪要结构化：从聊天记录/会议转录提取待办、决策、风险、责任人",
+    input_schema={"text": "string"},
+    output_schema={"todos": "array", "decisions": "array", "risks": "array", "owners": "array"},
+)
+async def meeting_notes(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text")
+    if not text:
+        return {"todos": [], "decisions": [], "risks": [], "owners": []}
+    prompt = f"""你是会议纪要助手。从下面的会议记录中提取结构化信息。
+- todos: [{{"task":"任务","owner":"责任人","deadline":"截止时间","priority":"high|medium|low"}}]
+- decisions: [{{"decision":"决策内容","owner":"决策人"}}]
+- risks: [{{"risk":"风险描述","level":"high|medium|low"}}]
+- owners: ["姓名1","姓名2"]（去重）
+无法确定的字段留空字符串。只输出 JSON:
+{{"todos":[],"decisions":[],"risks":[],"owners":[]}}
+
+会议记录：
+{text}"""
+    raw = await chat(prompt, system="你是会议纪要助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {"todos": [], "decisions": [], "risks": [], "owners": []})
+    return {
+        "todos": data.get("todos") or [],
+        "decisions": data.get("decisions") or [],
+        "risks": data.get("risks") or [],
+        "owners": data.get("owners") or [],
+    }
+
+
+@register(
+    name="task_extractor",
+    description="待办提取器：从任意文本提取带优先级的任务清单",
+    input_schema={"text": "string"},
+    output_schema={"tasks": "array", "count": "number"},
+)
+async def task_extractor(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", "todos")
+    if not text:
+        return {"tasks": [], "count": 0}
+    prompt = f"""你是任务提取助手。从下面文本中提取可执行任务。
+每项格式: {{"task":"任务描述","priority":"high|medium|low","due":"截止时间或空"}}
+无法确定字段留空。只输出 JSON: {{"tasks":[]}}
+
+文本：
+{text}"""
+    raw = await chat(prompt, system="你是任务提取助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {"tasks": []})
+    tasks = data.get("tasks") or []
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+@register(
+    name="email_compose",
+    description="智能邮件撰写：根据要点生成完整邮件（正式/简洁/委婉）",
+    input_schema={"points": "string", "tone": "string 可选，默认正式", "recipient": "string 可选"},
+    output_schema={"subject": "string", "body": "string"},
+)
+async def email_compose(inputs: dict) -> dict:
+    points = inputs.get("points") or ""
+    # 工作流场景：若上游是 meeting_notes，自动把 todos 拼成要点
+    if not points and inputs.get("todos"):
+        points = "\n".join(
+            f"- {t.get('task', '')}（负责人:{t.get('owner', '')} 截止:{t.get('deadline', '')}）"
+            for t in inputs["todos"] if isinstance(t, dict)
+        )
+    if not points:
+        points = _tool_text(inputs, "text", "summary")
+    if not points:
+        return {"subject": "", "body": ""}
+    tone = inputs.get("tone") or "正式"
+    recipient = inputs.get("recipient") or ""
+    prompt = f"""你是商务邮件撰写助手。请根据要点写一封「{tone}」语气的邮件。
+收件人: {recipient or '（未指定）'}
+要求：主题简洁明确；正文结构完整（称呼/正文/结尾）；不编造事实。
+只输出 JSON: {{"subject":"邮件主题","body":"邮件正文"}}
+
+要点：
+{points}"""
+    raw = await chat(prompt, system="你是邮件撰写助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"subject": "", "body": ""})
+    return {"subject": data.get("subject") or "", "body": data.get("body") or ""}
+
+
+@register(
+    name="slide_outline",
+    description="PPT大纲生成：把文档/文本转成每页标题+要点的PPT大纲",
+    input_schema={"text": "string", "pages": "number 可选，默认5"},
+    output_schema={"slides": "array", "total_pages": "number"},
+)
+async def slide_outline(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"slides": [], "total_pages": 0}
+    try:
+        pages = max(1, min(20, int(inputs.get("pages", 5))))
+    except (TypeError, ValueError):
+        pages = 5
+    prompt = f"""你是演示文稿设计专家。把下面的内容组织成 {pages} 页 PPT 大纲。
+每页格式: {{"title":"页面标题","bullets":["要点1","要点2","要点3"]}}
+要求：每页 3-5 个要点；逻辑递进；基于原文不编造。
+只输出 JSON: {{"slides":[]}}
+
+内容：
+{text}"""
+    raw = await chat(prompt, system="你是PPT大纲助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"slides": []})
+    slides = data.get("slides") or []
+    return {"slides": slides, "total_pages": len(slides)}
+
+
+# ---------------------------------------------------------------------
+# 阶段三：学习/知识类工具
+# ---------------------------------------------------------------------
+
+@register(
+    name="feynman_explain",
+    description="费曼讲解器：用大白话+比喻解释复杂概念，可指定受众",
+    input_schema={"concept": "string", "audience": "string 可选，默认外行", "text": "string 可选 参考材料"},
+    output_schema={"explanation": "string", "analogy": "string", "key_points": "array"},
+)
+async def feynman_explain(inputs: dict) -> dict:
+    # concept 取原始问题，不受 input_from（用于指定参考材料来源）影响
+    concept = (inputs.get("concept") or inputs.get("question")
+               or str(inputs.get("text") or "")[:200])
+    if not concept:
+        return {"explanation": "", "analogy": "", "key_points": []}
+    material = _tool_text(inputs, "chunks", "text", limit=6000)
+    material_hint = f"\n参考材料：\n{material}" if material else ""
+    audience = inputs.get("audience") or "外行"
+    prompt = f"""你是费曼讲解大师。请用「{audience}」能听懂的方式解释概念「{concept}」。
+要求：
+1. 用一个生活中的比喻贯穿始终。
+2. 语言口语化，避免术语堆砌；必要术语要解释。
+3. 给出 3-5 个关键点。{material_hint}
+只输出 JSON: {{"explanation":"通俗解释","analogy":"核心比喻","key_points":["要点1","要点2"]}}"""
+    raw = await chat(prompt, system="你是讲解助手，只输出 JSON。", json_mode=True, temperature=0.5)
+    data = _safe_json(raw, {"explanation": "", "analogy": "", "key_points": []})
+    return {
+        "explanation": data.get("explanation") or "",
+        "analogy": data.get("analogy") or "",
+        "key_points": data.get("key_points") or [],
+    }
+
+
+@register(
+    name="mindmap_outline",
+    description="思维导图大纲：把文本转成Markdown层级大纲",
+    input_schema={"text": "string", "max_depth": "number 可选，默认3"},
+    output_schema={"outline": "string"},
+)
+async def mindmap_outline(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"outline": ""}
+    try:
+        depth = max(1, min(5, int(inputs.get("max_depth", 3))))
+    except (TypeError, ValueError):
+        depth = 3
+    prompt = f"""你是结构化专家。把下面的文本组织成 Markdown 层级大纲（思维导图结构）。
+要求：最多 {depth} 层；用 "- " 表示层级，每级缩进2个空格；覆盖主要内容。
+只输出 JSON: {{"outline":"- 主题\\n  - 分支1\\n    - 子项"}}
+
+文本：
+{text}"""
+    raw = await chat(prompt, system="你是大纲生成助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"outline": ""})
+    return {"outline": data.get("outline") or ""}
+
+
+@register(
+    name="generate_quiz",
+    description="智能出题器：根据文本/检索结果生成选择题（含答案与解析）",
+    input_schema={"text": "string", "count": "number 可选，默认5", "difficulty": "string easy|medium|hard"},
+    output_schema={"questions": "array", "count": "number"},
+)
+async def generate_quiz(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"questions": [], "count": 0}
+    try:
+        count = max(1, min(20, int(inputs.get("count", 5))))
+    except (TypeError, ValueError):
+        count = 5
+    difficulty = inputs.get("difficulty") or "medium"
+    prompt = f"""你是出题老师。根据下面材料出 {count} 道 {difficulty} 难度单选题。
+每题格式: {{"q":"题干","options":["A.选项1","B.选项2","C.选项3","D.选项4"],"answer":"A","explanation":"解析"}}
+要求：答案唯一且在选项中；解析引用材料内容；不超出材料范围。
+只输出 JSON: {{"questions":[]}}
+
+材料：
+{text}"""
+    raw = await chat(prompt, system="你是出题助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"questions": []})
+    questions = data.get("questions") or []
+    return {"questions": questions, "count": len(questions)}
+
+
+@register(
+    name="flashcards",
+    description="记忆卡片生成：把知识转成Anki格式Q/A卡片",
+    input_schema={"text": "string", "count": "number 可选，默认10"},
+    output_schema={"cards": "array", "count": "number"},
+)
+async def flashcards(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"cards": [], "count": 0}
+    try:
+        count = max(1, min(30, int(inputs.get("count", 10))))
+    except (TypeError, ValueError):
+        count = 10
+    prompt = f"""你是记忆卡片专家。根据下面材料制作 {count} 张 Anki 记忆卡片。
+每张格式: {{"front":"问题/提示","back":"答案/解释","tags":["标签1"]}}
+要求：一卡一知识点；front 简洁明确；back 准确完整；不编造材料外内容。
+只输出 JSON: {{"cards":[]}}
+
+材料：
+{text}"""
+    raw = await chat(prompt, system="你是记忆卡片助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"cards": []})
+    cards = data.get("cards") or []
+    return {"cards": cards, "count": len(cards)}
+
+
+# ---------------------------------------------------------------------
+# 阶段四：系统增强类工具（元工具）
+# ---------------------------------------------------------------------
+
+@register(
+    name="prompt_doctor",
+    description="Prompt医生：诊断并优化用户的prompt（清晰性、约束、格式）",
+    input_schema={"prompt": "string", "goal": "string 可选 期望达成目标"},
+    output_schema={"diagnosis": "string", "optimized": "string", "suggestions": "array"},
+)
+async def prompt_doctor(inputs: dict) -> dict:
+    prompt_text = inputs.get("prompt") or _tool_text(inputs, "text", limit=4000)
+    if not prompt_text:
+        return {"diagnosis": "", "optimized": "", "suggestions": []}
+    goal = inputs.get("goal") or ""
+    goal_hint = f"\n用户期望目标：{goal}" if goal else ""
+    review_prompt = f"""你是提示工程专家。请诊断并优化下面的 prompt。
+诊断维度：角色设定、任务清晰度、输出格式约束、避免歧义、长度控制。{goal_hint}
+只输出 JSON:
+{{"diagnosis":"问题诊断","optimized":"优化后的prompt","suggestions":["建议1","建议2"]}}
+
+待诊断的 prompt：
+{prompt_text}"""
+    raw = await chat(review_prompt, system="你是提示工程专家，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"diagnosis": "", "optimized": prompt_text, "suggestions": []})
+    return {
+        "diagnosis": data.get("diagnosis") or "",
+        "optimized": data.get("optimized") or prompt_text,
+        "suggestions": data.get("suggestions") or [],
+    }
+
+
+@register(
+    name="tool_matchmaker",
+    description="工具匹配器：用自然语言描述需求→推荐工具组合",
+    input_schema={"requirement": "string"},
+    output_schema={"tools": "array", "reason": "string", "suggested_workflow": "string"},
+)
+async def tool_matchmaker(inputs: dict) -> dict:
+    requirement = inputs.get("requirement") or _tool_text(inputs, "text", limit=2000)
+    if not requirement:
+        return {"tools": [], "reason": "", "suggested_workflow": ""}
+    catalog = "\n".join(f"- {t['name']}: {t['description']}" for t in list_tools())
+    prompt = f"""你是工具编排顾问。根据用户需求，从下面的工具清单中推荐合适的工具组合（按顺序）。
+工具清单：
+{catalog}
+
+用户需求：{requirement}
+
+只输出 JSON:
+{{"tools":["工具名1","工具名2"],"reason":"推荐理由","suggested_workflow":"建议的工作流名"}}
+注意：tools 中的名字必须来自上面的清单，不要发明。"""
+    raw = await chat(prompt, system="你是工具推荐助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"tools": [], "reason": "", "suggested_workflow": ""})
+    valid = set(TOOLS.keys())
+    tools = [t for t in (data.get("tools") or []) if t in valid]
+    return {
+        "tools": tools,
+        "reason": data.get("reason") or "",
+        "suggested_workflow": data.get("suggested_workflow") or "",
+    }
+
+
+@register(
+    name="workflow_advisor",
+    description="工作流诊断师：读取指定工作流的YAML并给出优化建议",
+    input_schema={"name": "string"},
+    output_schema={"current": "string", "issues": "array", "suggestions": "array"},
+)
+async def workflow_advisor(inputs: dict) -> dict:
+    from app.engine import load_workflow_raw  # 延迟导入，避免与 engine 循环依赖
+
+    name = inputs.get("name") or inputs.get("workflow") or _tool_text(inputs, "text", limit=100)
+    if not name:
+        return {"current": "", "issues": [], "suggestions": []}
+    try:
+        current = load_workflow_raw(name)
+    except (FileNotFoundError, ValueError) as e:
+        return {"current": "", "issues": [f"无法加载工作流: {e}"], "suggestions": []}
+    prompt = f"""你是工作流架构师。请审查下面的 YAML 工作流定义并给出优化建议。
+审查维度：步骤顺序、条件分支有效性、with 参数使用、冗余步骤、潜在错误。
+只输出 JSON:
+{{"issues":["发现的问题1"],"suggestions":["优化建议1"]}}
+
+工作流 {name} 的 YAML：
+{current}"""
+    raw = await chat(prompt, system="你是工作流诊断助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"issues": [], "suggestions": []})
+    return {
+        "current": current,
+        "issues": data.get("issues") or [],
+        "suggestions": data.get("suggestions") or [],
+    }
+
+
+@register(
+    name="result_critic",
+    description="结果评审员：对工作流输出打分并给出改进建议（可作质量关卡）",
+    input_schema={"content": "string", "criteria": "string 可选 评判标准"},
+    output_schema={"score": "number", "strengths": "array", "weaknesses": "array", "suggestions": "array"},
+)
+async def result_critic(inputs: dict) -> dict:
+    content = _tool_text(inputs, "content", limit=6000)
+    if not content:
+        return {"score": 0, "strengths": [], "weaknesses": [], "suggestions": []}
+    criteria = inputs.get("criteria") or "准确性、完整性、表达清晰度"
+    prompt = f"""你是质量评审专家。请按以下标准评审下面的内容并打分（0-10分）。
+评判标准：{criteria}
+只输出 JSON:
+{{"score":7.5,"strengths":["优点1"],"weaknesses":["不足1"],"suggestions":["改进建议1"]}}
+
+待评审内容：
+{content}"""
+    raw = await chat(prompt, system="你是质量评审助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"score": 0, "strengths": [], "weaknesses": [], "suggestions": []})
+    try:
+        score = max(0.0, min(10.0, float(data.get("score", 0))))
+    except (TypeError, ValueError):
+        score = 0.0
+    return {
+        "score": score,
+        "strengths": data.get("strengths") or [],
+        "weaknesses": data.get("weaknesses") or [],
+        "suggestions": data.get("suggestions") or [],
+    }

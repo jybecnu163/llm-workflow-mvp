@@ -81,3 +81,61 @@ workflows:
     steps:
       - tool: rag_ingest
       - tool: rag_answer
+
+  # ===== TASKS.md 阶段五新增工作流 =====
+  # input_from 用于显式指定从上游哪一步的输出取值（引擎上下文为平铺合并）
+
+  content_factory:
+    description: 标题 → 扩写 → 润色 的全流程内容生产
+    steps:
+      - tool: generate_hooks
+      - tool: expand_article
+        with:
+          input_from: hooks          # 取标题列表首个作为扩写素材
+      - tool: rewrite_style
+        with:
+          input_from: expanded
+          style: 小红书风
+      - tool: polish_copy
+        with:
+          input_from: rewritten
+
+  study_buddy:
+    description: 检索知识库 → 大白话讲解 → 出题 → 制卡
+    steps:
+      - tool: rag_search
+      - tool: feynman_explain
+        with:
+          input_from: chunks         # 参考材料取自检索片段
+          audience: 外行
+      - tool: generate_quiz
+        with:
+          input_from: chunks
+          count: 5
+          difficulty: medium
+      - tool: flashcards
+        with:
+          input_from: chunks
+          count: 10
+
+  meeting_secretary:
+    description: 会议记录 → 待办提取 → 写库 → 邮件通知
+    steps:
+      - tool: meeting_notes
+      - tool: task_extractor
+      - tool: write_db
+      - tool: email_compose
+        with:
+          tone: 正式
+          # email_compose 自动从上游 todos 拼接为邮件要点
+
+  support_qa:
+    description: 客服文本 → 分类 → 情感 → 结果评审 → 告警
+    steps:
+      - tool: classify_email
+      - tool: sentiment_aspect
+      - tool: result_critic
+        with:
+          input_from: summary        # 评审情感抽取的摘要
+      - tool: alert_ops
+        condition: "score < 6"       # 低分触发告警

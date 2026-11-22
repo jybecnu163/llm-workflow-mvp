@@ -157,6 +157,22 @@ curl -X POST http://localhost:8000/run \
 
 完全本地：所有模型调用走本地 Ollama，数据不出机器。
 
+# 新增工具与工作流验证（TASKS.md）
+
+离线测试（无需 Ollama）：
+```bash
+.venv\Scripts\python.exe scripts\test_new_tools.py   # 72 项断言应全部 PASS
+```
+
+新增 16 个工具 / 4 个工作流，可在 Streamlit 验证：
+
+- 内容工厂：选 `content_factory`，输入产品卖点 → 标题 + 扩写 + 改写 + 润色
+- 学习助手：选 `study_buddy`（需先入库文档）→ 讲解 + 出题 + 记忆卡片
+- 会议秘书：选 `meeting_secretary`，输入会议记录 → 纪要 + 待办 + 邮件
+- 智能客服质检：选 `support_qa`，输入负面评价 → 评分 < 6 时触发告警
+
+工具串联依赖 `with.input_from` 显式指定数据来自上游哪一步的输出，详见 `EXECUTION_LOG.md`。
+
 # 下一步可扩展点
 
 工作流画布：把 YAML 换成 React Flow 可视化编辑，导出同样的 YAML。
