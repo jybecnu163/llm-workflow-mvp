@@ -1503,3 +1503,714 @@ async def result_critic(inputs: dict) -> dict:
         "weaknesses": data.get("weaknesses") or [],
         "suggestions": data.get("suggestions") or [],
     }
+
+
+# =====================================================================
+# 以下为 TASKS.md 批次二扩展工具（阶段七：文本与数据处理）
+# =====================================================================
+
+@register(
+    name="text_statistics",
+    description="文本统计：字数、句数、段落数、阅读时长、高频词（纯本地）",
+    input_schema={"text": "string"},
+    output_schema={"chars": "number", "words": "number", "sentences": "number",
+                   "paragraphs": "number", "read_minutes": "number", "top_words": "array"},
+)
+async def text_statistics(inputs: dict) -> dict:
+    import re as _re
+    from collections import Counter
+
+    text = _tool_text(inputs, "text", limit=100000)
+    if not text:
+        return {"chars": 0, "words": 0, "sentences": 0, "paragraphs": 0,
+                "read_minutes": 0, "top_words": []}
+    chars = len(text.replace(" ", "").replace("\n", ""))
+    cn = len(_re.findall(r"[\u4e00-\u9fff]", text))
+    en = _re.findall(r"\b\w+\b", text)
+    words = cn + len(en)
+    sentences = len([s for s in _re.split(r"[。！？!?；;]", text) if s.strip()])
+    paragraphs = len([p for p in text.splitlines() if p.strip()])
+    read_minutes = round(max(1, words / 300), 1)
+    stop = set("的了是在和与也很都就而及或其这那有为一个不人我你他她们")
+    tokens = [t for t in (_re.findall(r"[\u4e00-\u9fff]{2,}", text) + en) if t not in stop]
+    top = [{"word": w, "count": c} for w, c in Counter(tokens).most_common(10)]
+    return {"chars": chars, "words": words, "sentences": sentences,
+            "paragraphs": paragraphs, "read_minutes": read_minutes, "top_words": top}
+
+
+@register(
+    name="keyword_extractor",
+    description="关键词提取：从文本提取核心关键词/短语（偏主题概括）",
+    input_schema={"text": "string", "count": "number 可选，默认8"},
+    output_schema={"keywords": "array", "count": "number"},
+)
+async def keyword_extractor(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"keywords": [], "count": 0}
+    try:
+        count = max(1, min(20, int(inputs.get("count", 8))))
+    except (TypeError, ValueError):
+        count = 8
+    prompt = f"""你是关键词提取专家。从下面文本提取 {count} 个核心关键词或名词性短语。
+要求：按重要性排序；不编造原文没有的概念；每个 2-8 字。
+只输出 JSON: {{"keywords":["关键词1","关键词2"]}}
+
+文本：
+{text}"""
+    raw = await chat(prompt, system="你是关键词提取助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"keywords": []})
+    kws = [k for k in (data.get("keywords") or []) if isinstance(k, str) and k.strip()][:count]
+    return {"keywords": kws, "count": len(kws)}
+
+
+@register(
+    name="extract_table",
+    description="表格抽取：从文本/Markdown 中抽取表格并规范化为 JSON",
+    input_schema={"text": "string"},
+    output_schema={"tables": "array", "count": "number"},
+)
+async def extract_table(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=8000)
+    if not text:
+        return {"tables": [], "count": 0}
+    prompt = """你是表格抽取专家。从下面文本中抽取所有表格，规范化为 JSON。
+每个表格格式: {"headers":["列1","列2"],"rows":[["值1","值2"]]}
+要求：严格按原文，不补齐缺失值，缺失单元格用空字符串；忽略非表格文字。
+只输出 JSON: {"tables":[]}
+
+文本：
+{text}""".replace("{text}", text)
+    raw = await chat(prompt, system="你是表格抽取助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {"tables": []})
+    tables = data.get("tables") or []
+    return {"tables": tables, "count": len(tables)}
+
+
+@register(
+    name="text_to_json",
+    description="通用文本转 JSON：按自定义字段名把文本抽成结构化 JSON",
+    input_schema={"text": "string", "fields": "array 字段名列表", "schema_hint": "string 可选 字段说明"},
+    output_schema={"data": "object", "missing": "array"},
+)
+async def text_to_json(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    fields = inputs.get("fields") or []
+    if not isinstance(fields, list) or not fields:
+        return {"data": {}, "missing": []}
+    if not text:
+        return {"data": {}, "missing": list(fields)}
+    fields = [str(f) for f in fields][:30]
+    hint = inputs.get("schema_hint") or ""
+    template = json.dumps({f: "" for f in fields}, ensure_ascii=False)
+    prompt = f"""你是信息抽取专家。按下面字段名从文本中抽取信息，输出 JSON。
+字段说明: {hint or '无'}
+输出模板: {template}
+要求：找不到的字段填 null；不要发明模板之外的字段；只输出 JSON。
+
+文本：
+{text}"""
+    raw = await chat(prompt, system="你是信息抽取助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {})
+    result = data if isinstance(data, dict) else {}
+    missing = [f for f in fields if not result.get(f)]
+    return {"data": result, "missing": missing}
+
+
+@register(
+    name="dedupe_lines",
+    description="文本行去重：exact 精确去重 / normalized 归一化后去重（纯本地）",
+    input_schema={"text": "string", "mode": "string exact|normalized", "case_sensitive": "boolean 可选"},
+    output_schema={"lines": "array", "original": "number", "kept": "number", "removed": "number"},
+)
+async def dedupe_lines(inputs: dict) -> dict:
+    import re as _re
+
+    text = _tool_text(inputs, "text", limit=100000)
+    mode = inputs.get("mode") or "exact"
+    case_sensitive = inputs.get("case_sensitive", True)
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    seen = set()
+    kept = []
+    for ln in lines:
+        key = ln if case_sensitive else ln.lower()
+        if mode == "normalized":
+            key = _re.sub(r"[\s\W_]+", "", key)
+        if key not in seen:
+            seen.add(key)
+            kept.append(ln)
+    return {"lines": kept, "original": len(lines),
+            "kept": len(kept), "removed": len(lines) - len(kept)}
+
+
+# ---------------------------------------------------------------------
+# 阶段八：格式转换与校验工具
+# ---------------------------------------------------------------------
+
+@register(
+    name="json_validator",
+    description="JSON 校验与格式化：合法性检查、美化输出、键路径预览（纯本地）",
+    input_schema={"text": "string", "indent": "number 可选，默认2"},
+    output_schema={"valid": "boolean", "formatted": "string", "error": "string",
+                   "keys": "array", "size": "number"},
+)
+async def json_validator(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=200000)
+    if not text:
+        return {"valid": False, "formatted": "", "error": "输入为空", "keys": [], "size": 0}
+    try:
+        indent = max(0, min(8, int(inputs.get("indent", 2))))
+    except (TypeError, ValueError):
+        indent = 2
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError as e:
+        return {"valid": False, "formatted": "", "error": f"第{e.lineno}行第{e.colno}列: {e.msg}",
+                "keys": [], "size": 0}
+
+    def top_keys(o):
+        if isinstance(o, dict):
+            return list(o.keys())
+        if isinstance(o, list) and o and isinstance(o[0], dict):
+            return list(o[0].keys())
+        return []
+
+    def size_of(o):
+        return len(o) if isinstance(o, (list, dict, str)) else 1
+
+    return {"valid": True,
+            "formatted": json.dumps(obj, ensure_ascii=False, indent=indent),
+            "error": "", "keys": top_keys(obj), "size": size_of(obj)}
+
+
+@register(
+    name="yaml_validator",
+    description="YAML 校验：合法性检查并转 JSON 预览（纯本地）",
+    input_schema={"text": "string"},
+    output_schema={"valid": "boolean", "as_json": "string", "error": "string", "top_keys": "array"},
+)
+async def yaml_validator(inputs: dict) -> dict:
+    import yaml
+
+    text = _tool_text(inputs, "text", limit=200000)
+    if not text:
+        return {"valid": False, "as_json": "", "error": "输入为空", "top_keys": []}
+    try:
+        obj = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        return {"valid": False, "as_json": "", "error": str(e), "top_keys": []}
+    top_keys = list(obj.keys()) if isinstance(obj, dict) else []
+    return {"valid": True,
+            "as_json": json.dumps(obj, ensure_ascii=False, indent=2, default=str),
+            "error": "", "top_keys": top_keys}
+
+
+@register(
+    name="regex_generator",
+    description="正则表达式生成器：自然语言描述 → 正则 + 测试用例 + 编译校验",
+    input_schema={"description": "string", "sample_text": "string 可选"},
+    output_schema={"pattern": "string", "explanation": "string",
+                   "test_cases": "array", "python_valid": "boolean"},
+)
+async def regex_generator(inputs: dict) -> dict:
+    import re as _re
+
+    desc = inputs.get("description") or _tool_text(inputs, "text", limit=1000)
+    if not desc:
+        return {"pattern": "", "explanation": "", "test_cases": [], "python_valid": False}
+    sample = inputs.get("sample_text") or ""
+    prompt = f"""你是正则表达式专家。根据描述生成正则表达式和测试用例。
+描述: {desc}
+{sample and '参考文本: ' + sample[:1000]}
+只输出 JSON: {{"pattern":"正则","explanation":"说明","test_cases":[{{"text":"样例","should_match":true}}]}}
+注意：pattern 中的反斜杠需正确转义以便 JSON 解析。"""
+    raw = await chat(prompt, system="你是正则生成助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"pattern": "", "explanation": "", "test_cases": []})
+    pattern = data.get("pattern") or ""
+    valid = False
+    if pattern:
+        try:
+            _re.compile(pattern)
+            valid = True
+        except _re.error:
+            valid = False
+    return {"pattern": pattern, "explanation": data.get("explanation") or "",
+            "test_cases": data.get("test_cases") or [], "python_valid": valid}
+
+
+@register(
+    name="cron_explainer",
+    description="Cron 表达式互转：表达式→中文描述（纯本地）/ 描述→表达式（LLM）",
+    input_schema={"expression": "string 可选", "description": "string 可选"},
+    output_schema={"expression": "string", "description": "string",
+                   "fields": "object", "method": "string"},
+)
+async def cron_explainer(inputs: dict) -> dict:
+    expr = (inputs.get("expression") or "").strip()
+    desc = (inputs.get("description") or "").strip()
+    if expr:
+        parts = expr.split()
+        if len(parts) not in (5, 6):
+            return {"expression": expr, "description": "错误：Cron 表达式应为 5 或 6 段",
+                    "fields": {}, "method": "rule"}
+        names = ["分钟", "小时", "日", "月", "星期"] + (["年"] if len(parts) == 6 else [])
+        fields = dict(zip(names, parts))
+
+        def human(v, unit):
+            if v == "*":
+                return f"每{unit}"
+            if v.startswith("*/"):
+                return f"每 {v[2:]} {unit}"
+            if "-" in v:
+                return f"{v.split('-')[0]}-{v.split('-')[1]}{unit}区间"
+            if "," in v:
+                return f"{v.replace(',', '、')} {unit}"
+            return f"{v}{unit}"
+
+        seg = [human(p, n) for p, n in zip(parts, names)]
+        return {"expression": expr, "description": " ".join(seg) + " 执行",
+                "fields": fields, "method": "rule"}
+    if desc:
+        prompt = f"""你是 Cron 专家。把下面的中文调度描述转成标准 5 段 Cron 表达式。
+描述: {desc}
+只输出 JSON: {{"expression":"0 9 * * 1-5","explanation":"说明"}}"""
+        raw = await chat(prompt, system="你是Cron转换助手，只输出 JSON。", json_mode=True, temperature=0.1)
+        data = _safe_json(raw, {"expression": "", "explanation": ""})
+        return {"expression": data.get("expression") or "", "description": desc,
+                "fields": {}, "method": "llm"}
+    return {"expression": "", "description": "", "fields": {}, "method": "none"}
+
+
+@register(
+    name="markdown_table",
+    description="Markdown 表格美化：JSON 数组 → Markdown 表格（纯本地）",
+    input_schema={"rows": "array", "max_cols": "number 可选，默认10"},
+    output_schema={"markdown": "string", "rows": "number", "columns": "array"},
+)
+async def markdown_table(inputs: dict) -> dict:
+    rows = inputs.get("rows") or []
+    if not isinstance(rows, list):
+        single = inputs.get("text")
+        rows = _safe_json(single, {}).get("data", []) if single else []
+    if not rows:
+        return {"markdown": "", "rows": 0, "columns": []}
+    try:
+        max_cols = max(1, min(30, int(inputs.get("max_cols", 10))))
+    except (TypeError, ValueError):
+        max_cols = 10
+    if not all(isinstance(r, dict) for r in rows):
+        return {"markdown": "", "rows": 0, "columns": []}
+    columns = list(dict.fromkeys(c for r in rows for c in r.keys()))[:max_cols]
+    if not columns:
+        return {"markdown": "", "rows": 0, "columns": []}
+
+    def cell(v):
+        s = "" if v is None else str(v)
+        return s.replace("|", "\\|").replace("\n", "<br>")
+
+    lines = ["| " + " | ".join(columns) + " |",
+             "| " + " | ".join(["---"] * len(columns)) + " |"]
+    for r in rows:
+        lines.append("| " + " | ".join(cell(r.get(c)) for c in columns) + " |")
+    if len(columns) < len(set(c for r in rows for c in r.keys())):
+        lines.append(f"\n> 已截断到前 {max_cols} 列")
+    return {"markdown": "\n".join(lines), "rows": len(rows), "columns": columns}
+
+
+# ---------------------------------------------------------------------
+# 阶段九：开发辅助工具
+# ---------------------------------------------------------------------
+
+@register(
+    name="code_review",
+    description="代码审查：检查 bug、风格、性能、安全问题",
+    input_schema={"code": "string", "language": "string 可选，默认python",
+                  "focus": "string 可选 bug|style|performance|security"},
+    output_schema={"issues": "array", "score": "number", "summary": "string"},
+)
+async def code_review(inputs: dict) -> dict:
+    code = _tool_text(inputs, "code", limit=12000)
+    if not code:
+        return {"issues": [], "score": 0, "summary": ""}
+    language = inputs.get("language") or "python"
+    focus = inputs.get("focus") or "all"
+    prompt = f"""你是资深代码审查专家。审查下面的 {language} 代码（关注点: {focus}）。
+输出每项格式: {{"severity":"high|medium|low","line":0,"problem":"","suggestion":""}}
+只输出 JSON: {{"issues":[],"score":8.0,"summary":"总体评价"}}
+score 为 0-10 的代码质量分；没有问题则 issues 为空。
+
+代码：
+{code}"""
+    raw = await chat(prompt, system="你是代码审查助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {"issues": [], "score": 0, "summary": ""})
+    try:
+        score = max(0.0, min(10.0, float(data.get("score", 0))))
+    except (TypeError, ValueError):
+        score = 0.0
+    return {"issues": data.get("issues") or [], "score": score,
+            "summary": data.get("summary") or ""}
+
+
+@register(
+    name="explain_code",
+    description="代码解释：逐段解释代码在做什么",
+    input_schema={"code": "string", "audience": "string 可选，默认 开发者"},
+    output_schema={"overview": "string", "sections": "array", "notes": "string"},
+)
+async def explain_code(inputs: dict) -> dict:
+    code = _tool_text(inputs, "code", limit=12000)
+    if not code:
+        return {"overview": "", "sections": [], "notes": ""}
+    audience = inputs.get("audience") or "开发者"
+    prompt = f"""你是代码讲解专家。面向「{audience}」逐段解释下面的代码。
+sections 每项格式: {{"code":"代码片段","explanation":"解释"}}
+只输出 JSON: {{"overview":"整体概述","sections":[],"notes":"补充提示"}}
+
+代码：
+{code}"""
+    raw = await chat(prompt, system="你是代码讲解助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"overview": "", "sections": [], "notes": ""})
+    return {"overview": data.get("overview") or "",
+            "sections": data.get("sections") or [], "notes": data.get("notes") or ""}
+
+
+@register(
+    name="sql_generator",
+    description="自然语言转 SQL：根据表结构和问题生成 SELECT 语句",
+    input_schema={"question": "string", "schema": "string 表结构 DDL 或描述",
+                  "dialect": "string 可选 sqlite|mysql|postgresql"},
+    output_schema={"sql": "string", "explanation": "string", "assumptions": "array"},
+)
+async def sql_generator(inputs: dict) -> dict:
+    question = inputs.get("question") or _tool_text(inputs, "text", limit=2000)
+    schema = inputs.get("schema") or ""
+    if not question:
+        return {"sql": "", "explanation": "", "assumptions": []}
+    dialect = inputs.get("dialect") or "sqlite"
+    prompt = f"""你是 SQL 专家。根据表结构，把用户问题转成 {dialect} 方言的 SQL 查询。
+表结构:
+{schema or '（未提供，请仅基于问题描述假设并在 assumptions 中说明）'}
+要求：只生成 SELECT 查询，不生成增删改；不要编造表结构中不存在的列名；不确定的假设写入 assumptions。
+只输出 JSON: {{"sql":"SELECT ...","explanation":"说明","assumptions":[]}}
+
+用户问题: {question}"""
+    raw = await chat(prompt, system="你是SQL生成助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {"sql": "", "explanation": "", "assumptions": []})
+    return {"sql": data.get("sql") or "", "explanation": data.get("explanation") or "",
+            "assumptions": data.get("assumptions") or []}
+
+
+@register(
+    name="generate_test_cases",
+    description="测试用例生成：根据需求生成正常/边界/异常用例",
+    input_schema={"requirement": "string", "count": "number 可选，默认8"},
+    output_schema={"cases": "array", "count": "number"},
+)
+async def generate_test_cases(inputs: dict) -> dict:
+    req = inputs.get("requirement") or _tool_text(inputs, "text", "code", limit=4000)
+    if not req:
+        return {"cases": [], "count": 0}
+    try:
+        count = max(1, min(30, int(inputs.get("count", 8))))
+    except (TypeError, ValueError):
+        count = 8
+    prompt = f"""你是测试工程师。根据需求生成 {count} 条测试用例，覆盖正常/边界/异常三类。
+每条格式: {{"type":"normal|boundary|exception","input":"","expected":"","steps":[]}}
+只输出 JSON: {{"cases":[]}}
+
+需求:
+{req}"""
+    raw = await chat(prompt, system="你是测试用例生成助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"cases": []})
+    cases = data.get("cases") or []
+    return {"cases": cases, "count": len(cases)}
+
+
+@register(
+    name="commit_message",
+    description="Commit Message 生成：根据 diff 生成 Conventional Commits 规范提交信息",
+    input_schema={"diff": "string", "style": "string 可选 conventional|中文"},
+    output_schema={"subject": "string", "body": "string", "type": "string", "scope": "string"},
+)
+async def commit_message(inputs: dict) -> dict:
+    diff = _tool_text(inputs, "diff", limit=8000)
+    if not diff:
+        return {"subject": "", "body": "", "type": "", "scope": ""}
+    style = inputs.get("style") or "conventional"
+    prompt = f"""你是 Git 提交信息专家。根据下面的变更生成规范的 commit message。
+风格: {style}
+type 取 feat/fix/docs/style/refactor/perf/test/build/ci/chore/revert。
+subject 不超过 50 字，祈使句，不加句号。
+只输出 JSON: {{"subject":"feat(tools): 新增xxx","body":"变更详情","type":"feat","scope":"tools"}}
+
+变更内容:
+{diff}"""
+    raw = await chat(prompt, system="你是Commit信息助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"subject": "", "body": "", "type": "", "scope": ""})
+    return {"subject": data.get("subject") or "", "body": data.get("body") or "",
+            "type": data.get("type") or "", "scope": data.get("scope") or ""}
+
+
+# ---------------------------------------------------------------------
+# 阶段十：决策与分析工具
+# ---------------------------------------------------------------------
+
+@register(
+    name="pros_cons",
+    description="利弊分析：结构化列出 pros/cons 并给出决策建议",
+    input_schema={"topic": "string", "context": "string 可选"},
+    output_schema={"pros": "array", "cons": "array", "recommendation": "string", "confidence": "number"},
+)
+async def pros_cons(inputs: dict) -> dict:
+    topic = inputs.get("topic") or _tool_text(inputs, "text", limit=2000)
+    if not topic:
+        return {"pros": [], "cons": [], "recommendation": "", "confidence": 0.0}
+    context = inputs.get("context") or ""
+    prompt = f"""你是决策分析专家。对下面的决策主题做结构化利弊分析。
+每条格式: {{"point":"论点","weight":"high|medium|low"}}
+只输出 JSON: {{"pros":[],"cons":[],"recommendation":"建议","confidence":0.0}}
+confidence 为对建议的信心 0-1。
+
+主题: {topic}
+背景: {context or '无'}"""
+    raw = await chat(prompt, system="你是利弊分析助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"pros": [], "cons": [], "recommendation": "", "confidence": 0.0})
+    try:
+        conf = max(0.0, min(1.0, float(data.get("confidence", 0))))
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {"pros": data.get("pros") or [], "cons": data.get("cons") or [],
+            "recommendation": data.get("recommendation") or "", "confidence": conf}
+
+
+@register(
+    name="swot_analysis",
+    description="SWOT 分析：优势/劣势/机会/威胁四象限 + 行动策略",
+    input_schema={"subject": "string", "context": "string 可选"},
+    output_schema={"strengths": "array", "weaknesses": "array", "opportunities": "array",
+                   "threats": "array", "strategy": "string"},
+)
+async def swot_analysis(inputs: dict) -> dict:
+    subject = inputs.get("subject") or _tool_text(inputs, "text", limit=2000)
+    if not subject:
+        return {"strengths": [], "weaknesses": [], "opportunities": [], "threats": [], "strategy": ""}
+    context = inputs.get("context") or ""
+    prompt = f"""你是战略规划专家。对下面的对象做 SWOT 分析，每象限 3-5 条。
+只输出 JSON: {{"strengths":[],"weaknesses":[],"opportunities":[],"threats":[],"strategy":"行动策略"}}
+各项为字符串数组；strategy 给出基于四象限的具体行动建议。
+
+对象: {subject}
+背景: {context or '无'}"""
+    raw = await chat(prompt, system="你是SWOT分析助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"strengths": [], "weaknesses": [], "opportunities": [], "threats": []})
+    return {k: (data.get(k) or []) for k in
+            ["strengths", "weaknesses", "opportunities", "threats"]} | {
+                "strategy": data.get("strategy") or ""}
+
+
+@register(
+    name="priority_matrix",
+    description="优先级矩阵：艾森豪威尔四象限分类任务（重要/紧急）",
+    input_schema={"tasks": "array 任务列表", "input_from": "string 可选，默认读 tasks/todos"},
+    output_schema={"do_first": "array", "schedule": "array", "delegate": "array", "eliminate": "array"},
+)
+async def priority_matrix(inputs: dict) -> dict:
+    tasks = inputs.get("tasks") or inputs.get("todos") or []
+    if not tasks:
+        return {"do_first": [], "schedule": [], "delegate": [], "eliminate": []}
+    tasks = tasks[:50]
+    prompt = f"""你是时间管理专家。把下面的任务按艾森豪威尔矩阵分入四象限。
+- do_first: 重要且紧急
+- schedule: 重要不紧急
+- delegate: 不重要但紧急
+- eliminate: 不重要不紧急
+每项格式: {{"task":"任务","reason":"分类理由"}}
+只输出 JSON: {{"do_first":[],"schedule":[],"delegate":[],"eliminate":[]}}
+
+任务列表:
+{json.dumps(tasks, ensure_ascii=False, default=str)}"""
+    raw = await chat(prompt, system="你是优先级分类助手，只输出 JSON。", json_mode=True, temperature=0.1)
+    data = _safe_json(raw, {"do_first": [], "schedule": [], "delegate": [], "eliminate": []})
+    return {k: (data.get(k) or []) for k in
+            ["do_first", "schedule", "delegate", "eliminate"]}
+
+
+@register(
+    name="risk_assessment",
+    description="风险评估：识别风险、评级、给出缓解建议",
+    input_schema={"subject": "string", "context": "string 可选"},
+    output_schema={"risks": "array", "overall_level": "string low|medium|high", "mitigation": "array"},
+)
+async def risk_assessment(inputs: dict) -> dict:
+    subject = inputs.get("subject") or _tool_text(inputs, "text", limit=2000)
+    if not subject:
+        return {"risks": [], "overall_level": "low", "mitigation": []}
+    context = inputs.get("context") or ""
+    prompt = f"""你是风险管理专家。识别下面对象的风险并评估等级。
+每条风险格式: {{"risk":"风险描述","probability":"high|medium|low","impact":"high|medium|low","level":"high|medium|low"}}
+只输出 JSON: {{"risks":[],"overall_level":"medium","mitigation":["缓解措施"]}}
+
+对象: {subject}
+背景: {context or '无'}"""
+    raw = await chat(prompt, system="你是风险评估助手，只输出 JSON。", json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"risks": [], "overall_level": "medium", "mitigation": []})
+    level = data.get("overall_level") or "medium"
+    if level not in ("low", "medium", "high"):
+        level = "medium"
+    return {"risks": data.get("risks") or [], "overall_level": level,
+            "mitigation": data.get("mitigation") or []}
+
+
+# ---------------------------------------------------------------------
+# 阶段十一：内容增强工具
+# ---------------------------------------------------------------------
+
+@register(
+    name="hashtag_generator",
+    description="话题标签生成：为文案生成平台风格的话题标签",
+    input_schema={"text": "string", "platform": "string 可选 xhs|weibo|douyin", "count": "number 可选"},
+    output_schema={"hashtags": "array", "count": "number"},
+)
+async def hashtag_generator(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=3000)
+    if not text:
+        return {"hashtags": [], "count": 0}
+    try:
+        count = max(1, min(20, int(inputs.get("count", 8))))
+    except (TypeError, ValueError):
+        count = 8
+    platform = inputs.get("platform") or "xhs"
+    style = {"xhs": "小红书", "weibo": "微博", "douyin": "抖音"}.get(platform, platform)
+    prompt = f"""你是社交媒体运营专家。为下面文案生成 {count} 个「{style}」风格话题标签。
+要求：带 # 前缀；贴合内容；混用热门与精准标签；只输出 JSON: {{"hashtags":["#标签1","#标签2"]}}
+
+文案:
+{text}"""
+    raw = await chat(prompt, system="你是话题标签助手，只输出 JSON。", json_mode=True, temperature=0.5)
+    data = _safe_json(raw, {"hashtags": []})
+    tags = [t for t in (data.get("hashtags") or []) if isinstance(t, str) and t.strip()][:count]
+    return {"hashtags": tags, "count": len(tags)}
+
+
+@register(
+    name="readability_check",
+    description="可读性评分：结合本地句长统计与 LLM 评价，给出长句拆解建议与改进后文本",
+    input_schema={"text": "string"},
+    output_schema={
+        "score": "number",
+        "level": "string",
+        "long_sentences": "array",
+        "suggestions": "array",
+        "improved_text": "string",   # 新增
+    },
+)
+async def readability_check(inputs: dict) -> dict:
+    import re as _re
+
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"score": 0, "level": "", "long_sentences": [],
+                "suggestions": [], "improved_text": ""}
+
+    sentences = [s.strip() for s in _re.split(r"[。！？!?；;]", text) if s.strip()]
+    long_sentences = [s for s in sentences if len(s) > 60][:10]
+    avg = sum(len(s) for s in sentences) / max(1, len(sentences))
+
+    # 只对喂给 LLM 的部分做改写，控制 token 与 JSON 体积
+    rewrite_budget = 3000
+    src = text[:rewrite_budget]
+    truncated = len(text) > rewrite_budget
+
+    prompt = f"""你是文本可读性专家。请完成三件事：
+1. 评价下面文本的可读性（0-10分）；
+2. 给出改进建议（拆分长句、去冗余、调整语序等）；
+3. 在保持原意的前提下改写全文，使其更易读（不要加任何解释或标题）。
+
+平均句长: {avg:.1f} 字；超长句(>60字)数量: {len(long_sentences)}
+只输出 JSON，improved_text 为完整改写后的正文：
+{{"score":7.0,"level":"易读|适中|难读","suggestions":["改进建议"],"improved_text":"改写后的正文"}}
+
+文本:
+{src}"""
+
+    raw = await chat(prompt, system="你是可读性评价助手，只输出 JSON。",
+                     json_mode=True, temperature=0.2)
+    data = _safe_json(raw, {"score": 0, "level": "", "suggestions": [], "improved_text": ""})
+
+    try:
+        score = max(0.0, min(10.0, float(data.get("score", 0))))
+    except (TypeError, ValueError):
+        score = 0.0
+
+    improved = data.get("improved_text") or ""
+    if not isinstance(improved, str):
+        improved = ""
+    # 长度保护：改写不应无限膨胀
+    if len(improved) > len(src) * 2 + 200:
+        improved = improved[: len(src) * 2 + 200]
+    if truncated and improved:
+        improved += "\n\n（以上仅为前 3000 字的改写版本）"
+
+    return {
+        "score": score,
+        "level": data.get("level") or "",
+        "long_sentences": long_sentences,
+        "suggestions": data.get("suggestions") or [],
+        "improved_text": improved,
+    }
+
+
+@register(
+    name="seo_keywords",
+    description="SEO 关键词布局：主关键词、次关键词与投放位置建议",
+    input_schema={"text": "string", "target_keyword": "string 可选"},
+    output_schema={"primary": "string", "secondary": "array", "placement": "array", "suggestions": "array"},
+)
+async def seo_keywords(inputs: dict) -> dict:
+    text = _tool_text(inputs, "text", limit=6000)
+    if not text:
+        return {"primary": "", "secondary": [], "placement": [], "suggestions": []}
+    target = inputs.get("target_keyword") or ""
+    prompt = f"""你是 SEO 专家。为下面内容给出关键词布局建议。
+目标关键词: {target or '请自行判断'}
+placement 每项格式: {{"position":"标题|首段|小标题|结尾","keyword":"","suggestion":""}}
+只输出 JSON: {{"primary":"主关键词","secondary":["次关键词"],"placement":[],"suggestions":[]}}
+
+内容:
+{text[:4000]}"""
+    raw = await chat(prompt, system="你是SEO分析助手，只输出 JSON。", json_mode=True, temperature=0.3)
+    data = _safe_json(raw, {"primary": "", "secondary": [], "placement": [], "suggestions": []})
+    return {"primary": data.get("primary") or "", "secondary": data.get("secondary") or [],
+            "placement": data.get("placement") or [], "suggestions": data.get("suggestions") or []}
+
+
+@register(
+    name="language_detect",
+    description="语言检测：基于字符特征的快速语言识别（纯本地）",
+    input_schema={"text": "string"},
+    output_schema={"language": "string", "language_name": "string",
+                   "confidence": "number", "method": "string"},
+)
+async def language_detect(inputs: dict) -> dict:
+    import re as _re
+
+    text = _tool_text(inputs, "text", limit=10000)
+    if not text:
+        return {"language": "unknown", "language_name": "未知", "confidence": 0.0, "method": "rule"}
+    sample = text[:2000]
+    cn = len(_re.findall(r"[\u4e00-\u9fff]", sample))
+    kana = len(_re.findall(r"[\u3040-\u30ff]", sample))
+    hangul = len(_re.findall(r"[\uac00-\ud7af]", sample))
+    letters = len(_re.findall(r"[A-Za-z]", sample))
+    total = max(1, cn + kana + hangul + letters)
+    if kana / total > 0.15:
+        lang, name, conf = "ja", "日语", round(kana / total, 3)
+    elif hangul / total > 0.15:
+        lang, name, conf = "ko", "韩语", round(hangul / total, 3)
+    elif cn / total > 0.25:
+        lang, name, conf = "zh", "中文", round(cn / total, 3)
+    elif letters / total > 0.5:
+        lang, name, conf = "en", "英语", round(letters / total, 3)
+    else:
+        lang, name, conf = "other", "其他", round(max(cn, kana, hangul, letters) / total, 3)
+    return {"language": lang, "language_name": name, "confidence": conf, "method": "rule"}

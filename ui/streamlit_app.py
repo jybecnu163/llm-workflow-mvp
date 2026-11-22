@@ -200,6 +200,102 @@ TOOL_SAMPLES = {
         "content": "您好，您的订单正在处理中，预计明天送达。",
         "criteria": "准确性、礼貌性、信息完整性",
     },
+    # ===== 批次二：文本与数据处理 =====
+    "text_statistics": {
+        "text": "人工智能正在改变世界。机器学习是人工智能的核心分支，深度学习又是机器学习的重要方向。自然语言处理和计算机视觉是深度学习的两大应用场景。",
+    },
+    "keyword_extractor": {
+        "text": "央行宣布下调基准利率25个基点，分析人士认为这将提振股市表现，房地产板块或率先受益。",
+        "count": "8",
+    },
+    "extract_table": {
+        "text": "| 城市 | 销售额 | 数量 |\n|------|--------|------|\n| 上海 | 12000 | 12 |\n| 北京 | 8000 | 8 |\n| 深圳 | 15000 | 15 |",
+    },
+    "text_to_json": {
+        "text": "张三于2024年3月在北京加入腾讯公司，年薪50万元。",
+        "fields": '["姓名","时间","地点","公司","金额"]',
+        "schema_hint": "金额单位万元",
+    },
+    "dedupe_lines": {
+        "text": "苹果\n香蕉\n苹果\n橘子\n香蕉\n葡萄",
+        "mode": "exact",
+        "case_sensitive": "true",
+    },
+    # ===== 批次二：格式转换与校验 =====
+    "json_validator": {
+        "text": '{"name":"测试","items":[1,2,3],"valid":true}',
+        "indent": "2",
+    },
+    "yaml_validator": {
+        "text": "name: demo\ndescription: 示例工作流\nsteps:\n  - tool: summarize_text\n  - tool: write_db\n    condition: \"summary != ''\"",
+    },
+    "regex_generator": {
+        "description": "匹配中国大陆手机号（1开头，11位数字）",
+        "sample_text": "联系方式：13812345678 或 13900000000",
+    },
+    "cron_explainer": {
+        "expression": "0 9 * * 1-5",
+        "description": "",
+    },
+    "markdown_table": {
+        "rows": '[{"城市":"上海","销售额":12000},{"城市":"北京","销售额":8000}]',
+        "max_cols": "10",
+    },
+    # ===== 批次二：开发辅助 =====
+    "code_review": {
+        "code": "def add(a, b):\n    result = a + b\n    return result\n\ndef get_user(id):\n    query = 'SELECT * FROM users WHERE id = ' + id\n    return query",
+        "language": "python",
+        "focus": "security",
+    },
+    "explain_code": {
+        "code": "def fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)",
+        "audience": "开发者",
+    },
+    "sql_generator": {
+        "question": "统计各城市的销售额总和，按销售额降序排列",
+        "schema": "CREATE TABLE sales (id INT, 城市 VARCHAR(50), 销售额 DECIMAL(10,2), 日期 DATE);",
+        "dialect": "sqlite",
+    },
+    "generate_test_cases": {
+        "requirement": "用户登录功能：输入用户名和密码，正确则登录成功，错误则提示失败",
+        "count": "8",
+    },
+    "commit_message": {
+        "diff": "+ @register(name='new_tool')\n+ async def new_tool(inputs):\n+     return {'ok': True}\n- old_function()",
+        "style": "conventional",
+    },
+    # ===== 批次二：决策与分析 =====
+    "pros_cons": {
+        "topic": "是否将项目从虚拟环境迁移到 Docker 容器",
+        "context": "团队 5 人，需要统一开发环境",
+    },
+    "swot_analysis": {
+        "subject": "公司新推出的智能客服产品",
+        "context": "面向中小企业市场，竞品已有两家头部厂商",
+    },
+    "priority_matrix": {
+        "tasks": '[{"task":"修复线上支付bug"},{"task":"整理下季度规划"},{"task":"回复垃圾邮件"},{"task":"准备周一紧急会议材料"}]',
+    },
+    "risk_assessment": {
+        "subject": "计划在双十一上线新推荐算法",
+        "context": "流量预计增长 5 倍，团队缺乏大促经验",
+    },
+    # ===== 批次二：内容增强 =====
+    "hashtag_generator": {
+        "text": "秋天的第一杯奶茶，暖心又暖胃，快来打卡吧！",
+        "platform": "xhs",
+        "count": "8",
+    },
+    "readability_check": {
+        "text": "人工智能技术是一种通过模拟人类智能行为来实现自动化处理的前沿技术领域，它在当今社会的各个行业和场景中都得到了越来越广泛的应用和深入的探索。",
+    },
+    "seo_keywords": {
+        "text": "本文介绍了如何选择适合的笔记本电脑，包括处理器、内存、显卡等核心配置的选择建议。",
+        "target_keyword": "笔记本电脑选购",
+    },
+    "language_detect": {
+        "text": "Hello world! 这是一段中英混合的文本。",
+    },
 }
 
 st.set_page_config(page_title="LLM Workflow MVP", layout="wide")

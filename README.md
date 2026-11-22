@@ -173,6 +173,21 @@ curl -X POST http://localhost:8000/run \
 
 工具串联依赖 `with.input_from` 显式指定数据来自上游哪一步的输出，详见 `EXECUTION_LOG.md`。
 
+# 批次二工具验证（TASKS.md 任务 24-53）
+
+离线测试（无需 Ollama）：
+```bash
+.venv\Scripts\python.exe scripts\test_batch2_tools.py   # 93 项断言应全部 PASS
+```
+
+新增 23 个工具 / 4 个工作流：
+- 数据清洗流水线：输入含表格文本 → Markdown 表格
+- 智能纪要升级：输入会议记录 → 四象限任务 + 邮件
+- 代码评审助手：输入代码 → 审查 + 解释 + 用例 + 评分
+- RAG 增强检索：先入库文档 → 输入问题 → 带来源答案
+
+纯本地零成本工具：`text_statistics`、`dedupe_lines`、`json_validator`、`yaml_validator`、`markdown_table`、`language_detect`、`cron_explainer(表达式分支)`。
+
 # 下一步可扩展点
 
 工作流画布：把 YAML 换成 React Flow 可视化编辑，导出同样的 YAML。

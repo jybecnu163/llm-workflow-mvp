@@ -168,3 +168,95 @@ load_workflows() → 工作流总数 16
 **签收时间**：2026-11-21
 **环境**：Python 3.14.4 (.venv) / FastAPI / mock 测试模式
 
+---
+---
+
+# 批次二执行记录（任务 24-53）
+
+> 执行日期：2026-11-22。延续批次一的"设计 → 编码 → 测试 → 验证 → 签收"流程。
+
+## B2.1 设计阶段
+
+新增 23 个工具，分 5 类；复用批次一建立的 `@register` + `_tool_text` + `input_from` 机制。
+7 个工具采用**纯本地规则实现**（`text_statistics`/`dedupe_lines`/`json_validator`/`yaml_validator`/
+`markdown_table`/`language_detect`，以及 `cron_explainer` 的表达式→描述分支），零 LLM 成本。
+
+**关键设计决策**：
+- `priority_matrix` 用 `inputs.get("tasks") or inputs.get("todos")` 读取上游，兼容 `meeting_notes`(todos) 与 `task_extractor`(tasks)
+- `cron_explainer` 双分支：有 expression 走纯规则解析，有 description 走 LLM 生成
+- `readability_check` 混合：本地计算平均句长/长句数，LLM 给评分与建议
+
+新增 4 个工作流：`data_cleaning_pipeline`、`smart_meeting_upgrade`、`code_review_assistant`、`rag_enhanced_search`。
+
+## B2.2 编码阶段
+
+| 阶段 | 任务 | 产出 | 状态 |
+|------|------|------|------|
+| 七 | 24-28 | text_statistics / keyword_extractor / extract_table / text_to_json / dedupe_lines | ✅ |
+| 八 | 29-33 | json_validator / yaml_validator / regex_generator / cron_explainer / markdown_table | ✅ |
+| 九 | 34-38 | code_review / explain_code / sql_generator / generate_test_cases / commit_message | ✅ |
+| 十 | 39-42 | pros_cons / swot_analysis / priority_matrix / risk_assessment | ✅ |
+| 十一 | 43-46 | hashtag_generator / readability_check / seo_keywords / language_detect | ✅ |
+| 十二 | 47-50 | 4 个工作流写入 default.yaml | ✅ |
+
+**编码中修复的设计缺陷**：`generate_test_cases` 原仅接受 `requirement`/`text`，但工作流
+`code_review_assistant` 的上游字段是 `code`，导致输入为空、产出空 cases。已把取值回退链
+改为 `_tool_text(inputs, "text", "code")`，工作流联调通过。
+
+**涉及文件**：`app/tools.py`（+约 674 行）、`app/workflows/default.yaml`（+46 行）、
+`ui/streamlit_app.py`（TOOL_SAMPLES +96 行）。
+
+## B2.3 测试与验证阶段
+
+### B2.3.1 注册与预设用例验证
+```
+check_tools.py → 已注册 69 个工具（46 + 23）
+AST 校验 TOOL_SAMPLES → 预设用例 69 / 工具 69，未覆盖[] 多余[]
+```
+
+### B2.3.2 离线测试
+```
+脚本：scripts/test_batch2_tools.py
+结果：PASS=93  FAIL=0
+覆盖：工具注册(46) + 纯本地工具(10) + LLM工具(20) + 工作流编排(17)
+回归：scripts/test_new_tools.py → PASS=72  FAIL=0（批次一无回归）
+```
+
+测试中修复的问题：
+1. `generate_test_cases` 输入回退链缺陷（见 B2.2）
+2. 测试 mock 缺少"邮件撰写助手"/"任务提取助手"/"会议纪要助手"回复 → 补全
+
+### B2.3.3 API 端点验证
+```
+启动 uvicorn app.main:app --port 8126
+→ /health: ok
+→ /tools: 69 个工具
+→ /workflows: 4 个批次二新工作流均在线
+```
+
+### B2.3.4 未能执行的验证项
+Ollama 服务仍未启动，真实 LLM 调用与 Streamlit 端到端验证保留为待办：
+- 23 个工具的真实模型输出质量
+- 4 个新工作流的真实运行（尤其 `rag_enhanced_search` 需先入库文档）
+- 前端 69 个预设用例的逐一点击验证
+
+## B2.4 签收（批次二）
+
+| 项目 | 结果 |
+|------|------|
+| TASKS.md 任务 24-53 | 全部完成并勾选 ✅ |
+| 新增工具 | 23 个（总数 69） |
+| 新增工作流 | 4 个（总数 20） |
+| 预设用例 | 69/69 全覆盖 |
+| 离线测试 | 93/93 PASS（批次一回归 72/72 PASS） |
+| API 验证 | 通过 |
+| Lint 检查 | 无新增错误 |
+| 文档更新 | 架构文档、README、TASKS.md 已同步 |
+
+**签收结论**：批次二的 23 个工具与 4 个工作流已完成设计、编码、预设用例与离线验证。
+其中 7 个纯本地工具无需 Ollama 即可直接运行。工作流串联逻辑经 mock 验证无误，
+修复了 1 个真实的输入回退链缺陷。真实 LLM 调用验证因 Ollama 未启动保留为待办，不影响代码交付。
+
+**签收时间**：2026-11-22
+**环境**：Python 3.14.4 (.venv) / FastAPI / mock 测试模式
+

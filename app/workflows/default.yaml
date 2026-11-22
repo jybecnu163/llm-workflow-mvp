@@ -139,3 +139,48 @@ workflows:
           input_from: summary        # 评审情感抽取的摘要
       - tool: alert_ops
         condition: "score < 6"       # 低分触发告警
+
+  # ===== TASKS.md 批次二阶段十二新增工作流 =====
+
+  data_cleaning_pipeline:
+    description: 表格抽取 → 校验 → 结构化 → 美化
+    steps:
+      - tool: extract_table
+      - tool: json_validator
+        with:
+          input_from: tables
+      - tool: text_to_json
+        with:
+          fields: ["类别", "数值", "备注"]
+      - tool: markdown_table
+
+  smart_meeting_upgrade:
+    description: 会议 → 任务 → 优先级矩阵 → 邮件
+    steps:
+      - tool: meeting_notes
+      - tool: task_extractor
+      - tool: priority_matrix
+        with:
+          input_from: tasks
+      - tool: email_compose
+        with:
+          tone: 正式
+
+  code_review_assistant:
+    description: 代码审查 → 解释 → 测试用例 → 双重评审
+    steps:
+      - tool: code_review
+      - tool: explain_code
+      - tool: generate_test_cases
+      - tool: result_critic
+        with:
+          criteria: 审查完整性与建议可行性
+
+  rag_enhanced_search:
+    description: 关键词提取 → 查询改写 → 多路检索问答
+    steps:
+      - tool: keyword_extractor
+      - tool: rag_rewrite_query
+      - tool: rag_answer_v2
+        with:
+          top_k: 8
