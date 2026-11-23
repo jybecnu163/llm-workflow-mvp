@@ -208,6 +208,36 @@ curl -X POST http://localhost:8000/run \
 
 验证：`python -c "from streamlit.testing.v1 import AppTest; ..."` 可模拟切换，0 异常。
 
+# 自然语言命令规划（批次三）
+
+新增「🗣️ 智能命令」tab：用一句话下达一串命令，系统先生成可依次执行的计划，确认后再顺序执行。
+
+链路：`自然语言指令 → Plan → Validate → Workflow → execute_workflow`
+
+能力要点：
+
+- 动态注入当前 69 个工具清单到规划 prompt，LLM 只负责产出结构化 JSON 计划
+- 校验器拦截幻觉工具名、非法参数、语法错误/危险的 condition 表达式
+- Plan 转成 workflow dict 后复用现有 YAML 引擎，不重复实现执行器
+- 支持「生成计划预览 → 确认执行」与「一步到位」两种模式
+
+```bash
+# 只生成计划（预览）
+curl -X POST http://localhost:8000/plan -H "Content-Type: application/json" \
+  -d '{"instruction":"把这段文字润色成小红书风，再加话题标签"}'
+
+# 生成并立即执行
+curl -X POST http://localhost:8000/plan/run -H "Content-Type: application/json" \
+  -d '{"instruction":"...","data":{"text":"原文"}}'
+
+# 执行已确认的计划
+curl -X POST http://localhost:8000/plan/execute -H "Content-Type: application/json" \
+  -d '{"workflow":{"name":"generated_plan","steps":[{"tool":"polish_copy","with":{"style":"小红书风"}}]},"data":{"text":"原文"}}'
+
+# 离线测试（无需 Ollama）
+python scripts/test_planner.py        # 28 项断言应全部 PASS
+```
+
 # 下一步可扩展点
 
 工作流画布：把 YAML 换成 React Flow 可视化编辑，导出同样的 YAML。

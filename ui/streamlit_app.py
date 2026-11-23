@@ -466,6 +466,114 @@ except Exception as e:
     st.stop()
 
 
+# ---------- 智能命令 Tab（fragment：预览计划 / 确认执行） ----------
+@st.fragment
+def render_plan_tab():
+    st.markdown("用一句话下达一串命令，系统先生成可依次执行的计划，确认后再顺序执行。")
+
+    examples = [
+        (
+            "把这段文字润色成小红书风，再加话题标签",
+            "新款保温杯，500ml 大容量，24 小时保温，配色清新，适合通勤和户外使用。",
+        ),
+        (
+            "从这段文本里抽取表格，再转成 Markdown",
+            "季度销售数据：\n| 城市 | 销售额 | 状态 |\n|---|---|---|\n| 上海 | 12000 | 超额完成 |\n| 北京 | 9800 | 达标 |\n| 广州 | 7500 | 待提升 |",
+        ),
+        (
+            "整理会议记录，提取任务排优先级，最后写封通知邮件",
+            "会议讨论 Q3 预算。张三负责本周五前完成招聘计划，李四负责跟进供应商合同。"
+            "风险：预算可能超支 10%。决定：优先保障核心项目。",
+        ),
+    ]
+    st.caption("💡 示例指令（点击一键填入指令 + 对应输入文本）：")
+    cols = st.columns(3)
+    for i, (ex, sample_text) in enumerate(examples):
+        with cols[i]:
+            if st.button(
+                ex[:10] + "…",
+                key=f"plan_ex_{i}",
+                help=f"指令：{ex}\n\n输入文本：{sample_text}",
+            ):
+                st.session_state["plan_instruction"] = ex
+                st.session_state["plan_text"] = sample_text
+                st.rerun(scope="fragment")
+
+    instruction = st.text_area(
+        "自然语言指令",
+        key="plan_instruction",
+        height=90,
+        placeholder="例如：先润色这段文字，再加话题标签",
+    )
+    input_text = st.text_area(
+        "输入文本（作为 data['text'] 传入）",
+        key="plan_text",
+        height=120,
+    )
+
+    if st.button("🧭 生成计划", key="btn_gen_plan"):
+        if not instruction.strip():
+            st.warning("请输入指令")
+        else:
+            with st.spinner("正在规划..."):
+                r = requests.post(
+                    f"{API}/plan",
+                    json={"instruction": instruction},
+                    timeout=180,
+                )
+            if r.status_code == 200:
+                payload = r.json()
+                st.session_state["plan_data"] = payload["plan"]
+                st.session_state["plan_workflow"] = payload["workflow"]
+            else:
+                st.error(r.text)
+
+    plan_data = st.session_state.get("plan_data")
+    if plan_data:
+        st.markdown("### 📋 计划预览")
+        st.markdown(f"**意图：** {plan_data.get('intent', '')}")
+
+        warnings = plan_data.get("warnings") or []
+        if warnings:
+            st.warning("计划存在以下告警，请确认后再执行：")
+            for w in warnings:
+                st.markdown(f"- ⚠️ {w}")
+
+        for i, step in enumerate(plan_data.get("steps", []), 1):
+            st.markdown(f"**{i}. `{step.get('tool')}`** — {step.get('reason', '')}")
+            if step.get("with"):
+                st.json(step["with"])
+            if step.get("condition"):
+                st.caption(f"条件: {step['condition']}")
+
+        if not plan_data.get("steps"):
+            st.warning("计划中没有可执行的步骤")
+
+        if st.button("▶ 确认执行", key="btn_exec_plan"):
+            with st.spinner("执行中..."):
+                r = requests.post(
+                    f"{API}/plan/execute",
+                    json={
+                        "workflow": st.session_state["plan_workflow"],
+                        "data": {"text": input_text},
+                    },
+                    timeout=300,
+                )
+            if r.status_code == 200:
+                result = r.json()["result"]
+                st.markdown("### 🛠 执行结果")
+                for i, s in enumerate(result.get("steps", []), 1):
+                    if s.get("skipped"):
+                        st.caption(f"{i}. `{s.get('tool')}` 已跳过（条件不满足）")
+                    elif s.get("error"):
+                        st.error(f"{i}. `{s.get('tool')}` 出错: {s['error']}")
+                    else:
+                        with st.expander(f"{i}. `{s.get('tool')}` 输出", expanded=(i == 1)):
+                            st.json(s.get("output"))
+            else:
+                st.error(r.text)
+
+
 # ---------- 工具库 Tab（fragment：切换工具只重跑本区域） ----------
 @st.fragment
 def render_tools_tab():
@@ -563,8 +671,8 @@ def render_workflow_test_tab():
         st.json(r.json())
 
 
-tab_tools, tab_wf, tab_wf_edit, tab_route, tab_rag = st.tabs(
-    ["🔧 工具库", "🔀 工作流测试", "✏️ 工具库更新", "🚦 自动路由", "📚 文档问答"]
+tab_tools, tab_wf, tab_wf_edit, tab_route, tab_rag, tab_plan = st.tabs(
+    ["🔧 工具库", "🔀 工作流测试", "✏️ 工具库更新", "🚦 自动路由", "📚 文档问答", "🗣️ 智能命令"]
 )
 
 with tab_tools:
@@ -784,3 +892,7 @@ with tab_rag:
                         )
             else:
                 st.error(r.text)
+
+# ---------- 智能命令 ----------
+with tab_plan:
+    render_plan_tab()

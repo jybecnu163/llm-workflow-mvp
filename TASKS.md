@@ -665,3 +665,115 @@ Day 13: 任务 51-53  （验证 + 文档收尾）
 
 > 批次二合计：23 个工具（其中 7 个纯本地/混合，零或低 LLM 成本）+ 4 个工作流。
 > 完成后工具总数 69 个，工作流总数 20 个。
+
+---
+---
+
+# 批次三：自然语言命令规划（任务 54-61）
+
+> 在批次二（69 个工具 + 35 个工作流）基础上，新增「自然语言 → 结构化计划 → 顺序执行」能力。
+> 核心架构：**NL → Plan → Validate → Execute**。LLM 只负责产出结构化 Plan，
+> 校验器拦截幻觉工具名 / 非法参数 / 非法 condition，执行阶段复用现有 YAML 引擎 `execute_workflow`，不重复造轮子。
+
+---
+
+## 阶段十四：Plan 数据结构与规划器（任务 54-57）
+
+### 任务 54：`schemas.py` — Plan 数据结构
+- [x] 目标：新增 `PlanStep` / `ExecutionPlan` / `PlanRequest` 三个 Pydantic 模型
+- [x] `PlanStep` 字段：`tool`（工具名）、`with_`（别名 `with`，参数字典）、`input_from`（指定上游输出键）、`condition`（条件表达式）、`reason`（规划理由）
+- [x] `ExecutionPlan` 字段：`intent`（用户意图复述）、`steps`（步骤列表）、`warnings`（校验告警列表）
+- [x] `PlanRequest` 字段：`instruction`（自然语言指令）、`data`（初始数据）、`auto_execute`（生成后是否立即执行）
+- [x] 验收：三个模型可正常构造；`PlanStep(with_={...})`（`with` 是 Python 保留字）与 JSON `{"with": {...}}` 均能正确解析
+
+### 任务 55：`app/planner.py` — `generate_plan` 规划器
+- [x] 目标：自然语言指令 → JSON 计划
+- [x] 实现要点：
+  - 动态注入 `list_tools()` 的工具名、描述、输入 Schema 到 System Prompt
+  - few-shot 示例 2-3 组（文案润色 / 数据清洗 / 会议纪要）
+  - `chat(..., json_mode=True, temperature=0.1)`，用 JSON 兜底解析
+  - 解析为 `ExecutionPlan`，调用 `validate_plan` 填充 `warnings`
+- [x] 验收：输入「先润色这段文字再加话题标签」，产出 `polish_copy → hashtag_generator` 计划
+
+### 任务 56：`app/planner.py` — `validate_plan` 校验器
+- [x] 目标：防止 LLM 幻觉，保证计划可执行
+- [x] 实现要点：
+  - 工具名存在：每个 `step.tool` 必须命中 `TOOLS`
+  - 参数合法：`with_` 的键必须在工具 `input_schema` 或允许的特殊键内
+  - condition 语法合法：`ast.parse(expr, mode="eval")` 通过，且禁止 `Call` / `Attribute` 等危险节点
+  - 返回 `list[str]` 告警，不抛异常（软校验）
+- [x] 验收：幻觉工具名、非法参数、语法错误 condition 均能产出明确告警
+
+### 任务 57：`app/planner.py` — `plan_to_workflow` 转换器
+- [x] 目标：把 `ExecutionPlan` 转成引擎可执行的 workflow dict
+- [x] 实现要点：每个 `PlanStep` → `{"tool":..., "with":..., "condition":...}`；`input_from` 合并进 `with`
+- [x] 输出 `{"name":"generated_plan", "description":intent, "steps":[...]}`，可直接传给 `execute_workflow`
+- [x] 验收：转换结果能被 `execute_workflow` 正确执行
+
+> **阶段十四检查点**：`planner.py` 三个函数可独立调用，离线 mock 下产出合法计划。
+
+---
+
+## 阶段十五：API 与 UI（任务 58-59）
+
+### 任务 58：`app/main.py` — 规划 API 端点
+- [x] `POST /plan`：入参 `PlanRequest`，返回 `{"plan":..., "workflow":...}`，只预览不执行
+- [x] `POST /plan/run`：入参 `PlanRequest`，生成并立即执行，返回 `{"plan":..., "result":...}`
+- [x] `POST /plan/execute`：入参 `{"workflow":..., "data":...}`，执行已确认的计划（供 UI 二次确认后调用）
+- [x] 验收：三个端点经 mock 验证可正常返回
+
+### 任务 59：`ui/streamlit_app.py` — 「🗣️ 智能命令」Tab
+- [x] 目标：用户用一句话下达命令，先预览步骤计划，确认后再顺序执行
+- [x] 实现要点：
+  - 文本输入 + 「生成计划」按钮，展示 `intent`、`steps`（工具名 / 参数 / 理由）与 `warnings`
+  - 有 warnings 时高亮提示，仍允许用户决定是否执行
+  - 「确认执行」按钮调用 `/plan/execute`，展示每步输出
+  - 提供 3 个示例指令一键填入
+- [x] 验收：输入示例指令 → 生成计划 → 确认执行 → 展示逐步结果
+
+> **阶段十五检查点**：UI 能完成「自然语言 → 计划预览 → 确认执行」闭环。
+
+---
+
+## 阶段十六：验证与收尾（任务 60-61）
+
+### 任务 60：离线测试
+- [x] 新建 `scripts/test_planner.py`，mock `chat()` 覆盖：
+  - 正常计划生成（步骤顺序正确）
+  - 幻觉工具名告警
+  - 非法参数告警
+  - 非法 condition 表达式告警
+  - `validate_plan` 对合法计划无告警
+  - `plan_to_workflow` → `execute_workflow` 端到端
+- [x] 回归：`test_batch2_tools.py` / `test_all_workflows.py` 全部通过
+- [x] 验收：全部 PASS，FAIL=0
+
+### 任务 61：文档与日志更新
+- [x] `README.md` 增加智能命令用法与示例
+- [x] `架构设计与开发说明.md` 增加 Plan 架构章节
+- [x] `EXECUTION_LOG.md` 追加批次三设计 / 编码 / 测试 / 签收记录
+- [x] `TASKS.md` 勾选批次三全部任务
+- [x] 验收：四份文档内容一致，无旧数字残留
+
+---
+
+## 附录 G：批次三变更文件总览
+
+| 文件                        | 变更                                                       |
+|---------------------------|----------------------------------------------------------|
+| `app/schemas.py`          | +3 个 Pydantic 模型（PlanStep / ExecutionPlan / PlanRequest） |
+| `app/planner.py`          | 新建：generate_plan / validate_plan / plan_to_workflow      |
+| `app/main.py`             | +3 个 API 端点（/plan、/plan/run、/plan/execute）               |
+| `ui/streamlit_app.py`     | +1 个 Tab「🗣️ 智能命令」                                       |
+| `scripts/test_planner.py` | 新建离线测试                                                   |
+
+## 附录 H：批次三推荐执行顺序（时间线）
+
+```
+Day 14: 任务 54-57 （数据结构 + 规划器）
+Day 15: 任务 58-59 （API + UI）
+Day 16: 任务 60-61 （测试 + 文档收尾）
+```
+
+> 批次三不新增工具或工作流，只新增「把自然语言翻译成已有工具调用序列」的编排层。
+> 核心原则：LLM 负责生成，规则负责校验，现有引擎负责执行。

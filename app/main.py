@@ -7,8 +7,15 @@ from app.engine import (
     save_workflow_raw,
     delete_workflow,
 )
+from app.planner import generate_plan, plan_to_workflow
 from app.router import classify_data
-from app.schemas import RunRequest, ToolRunRequest, WorkflowSaveRequest
+from app.schemas import (
+    PlanExecuteRequest,
+    PlanRequest,
+    RunRequest,
+    ToolRunRequest,
+    WorkflowSaveRequest,
+)
 from app.tools import list_tools, get_tool
 
 app = FastAPI(title="LLM Workflow MVP")
@@ -114,3 +121,34 @@ async def api_run(req: RunRequest):
         "route": route,
         "result": result,
     }
+
+
+# ---------- 自然语言命令规划 ----------
+
+@app.post("/plan")
+async def api_plan(req: PlanRequest):
+    """只生成计划并预览，不执行。"""
+    plan = await generate_plan(req.instruction)
+    return {
+        "plan": plan.model_dump(by_alias=True),
+        "workflow": plan_to_workflow(plan),
+    }
+
+
+@app.post("/plan/run")
+async def api_plan_run(req: PlanRequest):
+    """生成计划并立即执行（一步到位模式）。"""
+    plan = await generate_plan(req.instruction)
+    workflow = plan_to_workflow(plan)
+    result = await execute_workflow(workflow, req.data)
+    return {
+        "plan": plan.model_dump(by_alias=True),
+        "result": result,
+    }
+
+
+@app.post("/plan/execute")
+async def api_plan_execute(req: PlanExecuteRequest):
+    """执行用户已确认的计划（workflow dict）。"""
+    result = await execute_workflow(req.workflow, req.data)
+    return {"result": result}

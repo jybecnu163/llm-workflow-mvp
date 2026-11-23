@@ -3,10 +3,21 @@ import ast
 import asyncio
 import json
 import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# 离线环境缺 RAG 依赖时注入最小替身，仅用于模块导入（不触碰被测逻辑）
+for _name, _attrs in (("chromadb", {"PersistentClient": object}), ("pypdf", {"PdfReader": object})):
+    try:
+        __import__(_name)
+    except ImportError:
+        _mod = types.ModuleType(_name)
+        for _k, _v in _attrs.items():
+            setattr(_mod, _k, _v)
+        sys.modules[_name] = _mod
 
 from app import rag, tools
 from app.engine import execute_workflow, load_workflows
@@ -102,6 +113,10 @@ async def fake_ingest_chapters(dir_name="sanguo"):
     return {"dir": dir_name, "files": 120, "chunks_added": 1500, "collection_size": 1500}
 
 
+async def fake_ingest_document(path_name="test.md"):
+    return {"file": path_name, "pages": 1, "chunks_added": 3, "collection_size": 10}
+
+
 async def test_coverage():
     print("\n=== 1. 覆盖率检查 ===")
     wfs = load_workflows()
@@ -125,6 +140,7 @@ async def test_execute_all():
     samples = load_workflow_samples()
     with patch.object(tools, "chat", new=make_chat()), \
          patch.object(rag, "search", new=fake_search), \
+         patch.object(rag, "ingest_document", new=fake_ingest_document), \
          patch.object(rag, "ingest_chapter_files", new=fake_ingest_chapters):
         for name, wf in wfs.items():
             sample = samples.get(name, {})

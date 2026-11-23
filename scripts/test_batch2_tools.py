@@ -2,10 +2,21 @@
 import asyncio
 import json
 import sys
+import types
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# 离线环境缺 RAG 依赖时注入最小替身，仅用于模块导入（不触碰被测逻辑）
+for _name, _attrs in (("chromadb", {"PersistentClient": object}), ("pypdf", {"PdfReader": object})):
+    try:
+        __import__(_name)
+    except ImportError:
+        _mod = types.ModuleType(_name)
+        for _k, _v in _attrs.items():
+            setattr(_mod, _k, _v)
+        sys.modules[_name] = _mod
 
 from app import tools
 from app.engine import execute_workflow, load_workflows

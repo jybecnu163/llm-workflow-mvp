@@ -400,3 +400,82 @@ lint：无错误
 
 **签收时间**：2026-11-23
 
+---
+---
+
+# 批次三执行记录：自然语言命令规划（任务 54-61）
+
+## E.1 需求与任务卡片
+
+用户要求：按「自然语言 → 可执行命令序列」方案实施，写入 `TASKS.md`，依次实现与测试，完成后更新文档。
+
+已在 `TASKS.md` 追加批次三任务卡片 54-61，分三个阶段：
+
+| 阶段 | 任务 | 内容 |
+|----|----|----|
+| 十四 | 54-57 | Plan 数据结构、generate_plan、validate_plan、plan_to_workflow |
+| 十五 | 58-59 | 3 个 API 端点、UI「🗣️ 智能命令」tab |
+| 十六 | 60-61 | 离线测试与回归、文档与日志更新 |
+
+## E.2 设计阶段
+
+**核心架构**：`NL → Plan → Validate → Execute`
+
+- LLM 只负责把用户指令翻译成结构化 JSON 计划，不直接执行任何工具
+- 规则校验器拦截幻觉工具名、非法参数、非法/危险 condition
+- 计划转成 workflow dict 后复用 `engine.execute_workflow`，不重复实现执行器
+
+**关键决策**：
+
+1. `PlanStep.with_` 使用 Pydantic 别名 `with` 对接 LLM JSON；因为 `with` 是 Python 保留字，代码中必须用 `with_` 构造
+2. `validate_plan` 采用软校验（返回 `list[str]` 告警），不阻断执行，由用户在 UI 决定是否继续
+3. condition 用 `ast.parse(mode="eval")` 校验语法，并禁止 `Call`/`Attribute`/`Subscript` 等危险节点
+4. `input_from` 作为引擎级特殊键合并进 workflow 的 `with`
+
+## E.3 编码阶段
+
+| 文件                              | 变更                                                                      |
+|---------------------------------|-------------------------------------------------------------------------|
+| `app/schemas.py`                | 新增 `PlanStep` / `ExecutionPlan` / `PlanRequest` / `PlanExecuteRequest`  |
+| `app/planner.py`                | 新建：工具清单动态注入、few-shot、`generate_plan`、`validate_plan`、`plan_to_workflow` |
+| `app/main.py`                   | 新增 `POST /plan`、`POST /plan/run`、`POST /plan/execute`                   |
+| `ui/streamlit_app.py`           | 新增「🗣️ 智能命令」fragment tab，含示例填入、计划预览、告警展示、确认执行                           |
+| `scripts/test_planner.py`       | 新建离线测试（28 项断言）                                                          |
+| `scripts/test_all_workflows.py` | 补 `rag.ingest_document` mock，适配缺 RAG 依赖的离线环境                            |
+| `scripts/test_batch2_tools.py`  | 兼容缺 RAG 依赖的离线环境                                                         |
+
+**编码中修复的问题**：
+
+- `with` 关键字冲突：测试脚本改用 `with_=` 构造，并在 TASKS.md 验收标准中注明
+- 环境缺失 `chromadb` / `fastapi`：离线测试注入最小替身，直接调用端点函数验证逻辑，不修改运行时环境
+- `doc_ingest_and_qa` 因替身 `PersistentClient` 报错：补 `rag.ingest_document` mock 后恢复
+
+## E.4 测试与验证
+
+```
+scripts/test_planner.py       → PASS=28 FAIL=0
+  数据结构/校验器 8 项、计划生成 5 项、转换 6 项、端到端 4 项、端点 5 项
+scripts/test_batch2_tools.py  → PASS=93 FAIL=0（回归）
+scripts/test_all_workflows.py → PASS=55 FAIL=0（回归，35 个工作流）
+Python ast 语法检查           → ui/streamlit_app.py、app/{planner,main,schemas}.py 全部通过
+```
+
+**未能执行的验证项**：当前环境未安装 `fastapi` / `streamlit` / `chromadb`（Python 3.12 环境已失效），因此未启动真实 FastAPI 服务与 Streamlit AppTest；端点逻辑通过直接调用 async 端点函数 + mock 验证，UI 通过语法检查验证。
+
+## E.5 签收
+
+| 项目   | 结果                                                    |
+|------|-------------------------------------------------------|
+| 任务卡片 | TASKS.md 批次三 54-61 已勾选                                |
+| 数据结构 | 4 个模型，别名与字段名均可解析                                      |
+| 规划器  | generate_plan / validate_plan / plan_to_workflow 全部实现 |
+| 校验能力 | 幻觉工具名、非法参数、condition 语法/危险节点均有告警                      |
+| API  | /plan、/plan/run、/plan/execute 三个端点可用                  |
+| UI   | 「🗣️ 智能命令」tab 完成计划预览 → 确认执行闭环                         |
+| 测试   | 28 + 93 + 55 全部 PASS                                  |
+| 文档   | README、架构文档、执行日志、TASKS.md 已更新                         |
+
+**签收结论**：自然语言命令规划批次三全部任务完成。规划器生成、校验、转换、执行链路与三端点逻辑均通过离线测试，历史回归无退化。
+
+**签收时间**：2026-11-23
+
