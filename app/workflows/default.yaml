@@ -184,3 +184,188 @@ workflows:
       - tool: rag_answer_v2
         with:
           top_k: 8
+
+  # ===== 全工具覆盖工作流：补齐此前未被任何流程使用的 24 个工具 =====
+
+  news_intelligence:
+    description: 新闻情报：语言识别 → 分类 → 摘要 → 关键词 → 翻译 → 话题标签
+    steps:
+      - tool: language_detect
+      - tool: classify_news
+      - tool: summarize_text
+      - tool: keyword_extractor
+        with:
+          input_from: summary
+      - tool: translate_text
+        with:
+          input_from: summary
+          target_lang: 英文
+      - tool: hashtag_generator
+        with:
+          input_from: summary
+          platform: weibo
+
+  content_seo_optimizer:
+    description: SEO内容优化：统计 → 可读性 → 关键词 → 润色 → 表格
+    steps:
+      - tool: text_statistics
+      - tool: readability_check
+      - tool: seo_keywords
+      - tool: polish_copy
+        with:
+          style: 商务风
+      - tool: markdown_table
+        with:
+          input_from: placement
+
+  knowledge_mindmap:
+    description: 知识导图学习：检索 → 导图 → 费曼讲解 → 记忆卡
+    steps:
+      - tool: rag_search
+      - tool: mindmap_outline
+        with:
+          input_from: chunks
+      - tool: feynman_explain
+        with:
+          input_from: outline
+          audience: 外行
+      - tool: flashcards
+        with:
+          input_from: explanation
+          count: 8
+
+  decision_advisor:
+    description: 决策顾问：利弊 → SWOT → 风险评估 → 决策邮件
+    steps:
+      - tool: pros_cons
+      - tool: swot_analysis
+      - tool: risk_assessment
+      - tool: email_compose
+        with:
+          input_from: recommendation
+          tone: 正式
+
+  dev_delivery:
+    description: 开发交付：代码审查 → 解释 → 测试用例 → 提交信息 → 评审
+    steps:
+      - tool: code_review
+      - tool: explain_code
+      - tool: generate_test_cases
+      - tool: commit_message
+        with:
+          input_from: code
+      - tool: result_critic
+        with:
+          input_from: summary
+          criteria: 审查完整性、测试覆盖率、提交规范性
+
+  proofread_professional:
+    description: 专业校对：整体纠错 → 逐句纠错 → 术语保护 → 安全校验
+    steps:
+      - tool: correct_text
+      - tool: correct_text_by_sentence
+      - tool: protect_terms
+      - tool: verify_correction
+
+  text_cleanup:
+    description: 文本清洗：行去重 → 统计 → 关键词 → Markdown表格
+    steps:
+      - tool: dedupe_lines
+      - tool: text_statistics
+      - tool: keyword_extractor
+      - tool: markdown_table
+        with:
+          input_from: keywords
+
+  tag_aggregation:
+    description: 标签聚合：标签生成 → 归一化 → 置信度投票合并 → 表格
+    steps:
+      - tool: generate_travel_tags
+      - tool: normalize_tags
+      - tool: merge_tags
+        with:
+          input_from: normalized
+      - tool: markdown_table
+        with:
+          input_from: merged
+
+  prompt_lab:
+    description: Prompt实验室：Prompt诊断 → 工具匹配 → 工作流诊断 → 评审
+    steps:
+      - tool: prompt_doctor
+      - tool: tool_matchmaker
+        with:
+          input_from: optimized
+      - tool: workflow_advisor
+        with:
+          name: email_support
+      - tool: result_critic
+        with:
+          input_from: optimized
+
+  deck_builder:
+    description: PPT生成器：摘要 → 幻灯片大纲 → Markdown表格
+    steps:
+      - tool: summarize_text
+      - tool: slide_outline
+        with:
+          input_from: summary
+          pages: 6
+      - tool: markdown_table
+        with:
+          input_from: slides
+
+  sql_analyst:
+    description: SQL分析：自然语言转SQL → 质量评审 → 邮件报告
+    steps:
+      - tool: sql_generator
+      - tool: result_critic
+        with:
+          input_from: sql
+          criteria: SQL正确性、可读性、性能
+      - tool: email_compose
+        with:
+          input_from: explanation
+          tone: 正式
+
+  novel_kb_builder:
+    description: 小说知识库：批量入库分回 → 增强问答（三国演义）
+    steps:
+      - tool: rag_ingest_chapter_dir
+        with:
+          dir: sanguo
+      - tool: rag_answer_v2
+        with:
+          top_k: 8
+
+  regex_assistant:
+    description: 正则助手：生成正则 → 测试用例表格
+    steps:
+      - tool: regex_generator
+      - tool: markdown_table
+        with:
+          input_from: test_cases
+
+  format_validator:
+    description: 格式校验：JSON校验 → 键表格 → 文本统计 → YAML校验
+    steps:
+      - tool: json_validator
+      - tool: markdown_table
+        with:
+          input_from: keys
+      - tool: text_statistics
+        with:
+          input_from: formatted
+      - tool: yaml_validator
+        with:
+          input_from: formatted
+          condition: "valid == true"
+
+  cron_helper:
+    description: Cron助手：表达式解析 → 说明邮件
+    steps:
+      - tool: cron_explainer
+      - tool: email_compose
+        with:
+          input_from: description
+          tone: 简洁

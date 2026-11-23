@@ -6,6 +6,18 @@ import streamlit as st
 
 API = "http://localhost:8000"
 
+# 复用 TCP 连接 + 缓存只读请求，避免每次 widget 交互都重复访问后端
+_session = requests.Session()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def api_get(path: str):
+    """缓存 GET 请求：同一 path 在 30 秒内直接返回缓存，不再请求后端。"""
+    resp = _session.get(f"{API}{path}", timeout=5)
+    resp.raise_for_status()
+    return resp.json()
+
+
 # 各工具的预设测试用例：选择工具时自动填入，可直接运行或按需修改
 TOOL_SAMPLES = {
     # ---------- 分类 ----------
@@ -298,25 +310,166 @@ TOOL_SAMPLES = {
     },
 }
 
+# 各工作流的默认测试用例：选择工作流时自动填入 text 与附加 data 字段
+WORKFLOW_SAMPLES = {
+    "default": {
+        "text": "OpenAI发布了新一代大模型GPT-5，在多项基准测试中超越前代产品，API成本降低50%。",
+        "extra": "",
+    },
+    "email_spam": {
+        "text": "限时优惠！恭喜您获得一等奖，请点击链接填写个人信息领取奖金。",
+        "extra": "",
+    },
+    "email_support": {
+        "text": "我的订单12345还没到，已经等了一周了，请尽快处理！",
+        "extra": "",
+    },
+    "review_negative": {
+        "text": "这款产品质量太差了，物流也慢，客服态度还很不好，非常失望！",
+        "extra": "",
+    },
+    "news_finance": {
+        "text": "央行宣布下调基准利率25个基点，分析人士认为这将提振股市表现，科技板块或率先受益。",
+        "extra": "",
+    },
+    "translate_only": {
+        "text": "人工智能正在改变世界，大模型技术让生活更便捷。",
+        "extra": '{"target_lang":"英文","style":"formal"}',
+    },
+    "translate_summary": {
+        "text": "近日某公司发布新一代AI产品，可大幅提升办公效率。该产品采用最新大模型技术，支持多语言处理，已在多个行业落地应用。",
+        "extra": '{"target_lang":"英文"}',
+    },
+    "travel_tagging": {
+        "text": "日本大阪6日游，上海出发，4999元，入住四星酒店，往返春秋航空，适合亲子家庭夏季出行，含潜水体验。"
+    },
+    "text_correction": {
+        "text": "我门一起去公圆玩，看到很多漂亮的花，心晴很好。",
+        "extra": "",
+    },
+    "excel_nl_ops": {
+        "text": "按月份统计各城市的销售额",
+        "extra": '{"path":"sales.xlsx"}',
+    },
+    "doc_qa": {
+        "text": "项目总预算是多少？分几期拨付？",
+        "extra": "",
+    },
+    "doc_ingest_and_qa": {
+        "text": "项目总预算是多少？",
+        "extra": '{"path":"project_budget.md"}',
+    },
+    "content_factory": {
+        "text": "新款降噪耳机：续航40小时、主动降噪、轻巧便携，售价599元。",
+        "extra": "",
+    },
+    "study_buddy": {
+        "text": "什么是临床试验？",
+        "extra": "",
+    },
+    "meeting_secretary": {
+        "text": "会议讨论Q3预算。张三负责本周五前完成招聘计划，李四负责跟进供应商合同。风险：预算可能超支10%。决定：优先保障核心项目。",
+        "extra": "",
+    },
+    "support_qa": {
+        "text": "你们的产品太差了，物流慢质量差，客服还不回复， urgently需要处理！",
+        "extra": "",
+    },
+    "data_cleaning_pipeline": {
+        "text": "| 城市 | 销售额 | 数量 |\n|------|--------|------|\n| 上海 | 12000 | 12 |\n| 北京 | 8000 | 8 |\n| 深圳 | 15000 | 15 |",
+        "extra": "",
+    },
+    "smart_meeting_upgrade": {
+        "text": "会议讨论Q3预算。张三本周五前完成招聘计划；李四跟进供应商合同；本月底前上线新功能。请尽快回复垃圾推销邮件。",
+        "extra": "",
+    },
+    "code_review_assistant": {
+        "text": "请审查以下代码并生成测试用例。",
+        "extra": '{"code":"def get_user(id):\\n    query = \'SELECT * FROM users WHERE id = \' + id\\n    return query"}',
+    },
+    "rag_enhanced_search": {
+        "text": "诸葛亮北伐失败的原因是什么？",
+        "extra": "",
+    },
+    "news_intelligence": {
+        "text": "The Fed announced a rate cut of 25 basis points. 央行同步下调基准利率，科技股上涨。",
+        "extra": "",
+    },
+    "content_seo_optimizer": {
+        "text": "本文介绍了如何选择适合的笔记本电脑。处理器、内存和显卡是三大核心配置。建议根据预算和使用场景综合考量，选择Intel或AMD处理器，内存至少16GB。",
+        "extra": "",
+    },
+    "knowledge_mindmap": {
+        "text": "什么是机器学习？",
+        "extra": "",
+    },
+    "decision_advisor": {
+        "text": "是否将项目从虚拟环境迁移到Docker容器？",
+        "extra": "",
+    },
+    "dev_delivery": {
+        "text": "请交付以下功能的开发成果。",
+        "extra": '{"code":"def fib(n):\\n    if n <= 1:\\n        return n\\n    return fib(n-1) + fib(n-2)"}',
+    },
+    "proofread_professional": {
+        "text": "我门一起去公圆玩，看到很多漂亮的花。京东的俺们服务很好，心晴不错。",
+        "extra": "",
+    },
+    "text_cleanup": {
+        "text": "人工智能改变世界\n机器学习是AI核心\n人工智能改变世界\n深度学习是重要方向\n机器学习是AI核心",
+        "extra": "",
+    },
+    "tag_aggregation": {
+        "text": "亲子友好型海岛度假行程，含潜水体验，适合夏季出行，轻奢预算，网红打卡。",
+        "extra": "",
+    },
+    "prompt_lab": {
+        "text": "帮我写点东西",
+        "extra": "",
+    },
+    "deck_builder": {
+        "text": "2025年公司业务总结：营收增长30%，新客户增长50%，产品迭代3个大版本。明年计划拓展海外市场并加大AI投入。",
+        "extra": "",
+    },
+    "sql_analyst": {
+        "text": "统计各城市的销售额总和，按销售额降序排列",
+        "extra": '{"schema":"CREATE TABLE sales (id INT, 城市 VARCHAR(50), 销售额 DECIMAL(10,2), 日期 DATE);"}',
+    },
+    "novel_kb_builder": {
+        "text": "诸葛亮北伐失败的原因是什么？",
+        "extra": "",
+    },
+    "regex_assistant": {
+        "text": "生成手机号正则并给出测试用例。",
+        "extra": '{"description":"匹配中国大陆手机号（1开头，11位数字）","sample_text":"13812345678"}',
+    },
+    "format_validator": {
+        "text": '{"name":"测试","items":[1,2,3],"valid":true}',
+        "extra": "",
+    },
+    "cron_helper": {
+        "text": "生成工作日早上9点执行的定时任务说明。",
+        "extra": '{"expression":"0 9 * * 1-5"}',
+    },
+}
+
 st.set_page_config(page_title="LLM Workflow MVP", layout="wide")
 st.title("🧠 本地 LLM 工作流 MVP")
 st.caption("FastAPI + Ollama(llama3.1:8b) + YAML 工作流 + Streamlit")
 
-# 健康检查
+# 健康检查（走缓存，30 秒内不重复请求）
 try:
-    h = requests.get(f"{API}/health", timeout=3).json()
+    h = api_get("/health")
     st.success(f"API 状态: {h['status']}")
 except Exception as e:
     st.error(f"无法连接后端: {e}")
     st.stop()
 
-tab_tools, tab_wf, tab_wf_edit, tab_route, tab_rag = st.tabs(
-    ["🔧 工具库", "🔀 工作流测试", "✏️ 工具库更新", "🚦 自动路由", "📚 文档问答"]
-)
 
-# ---------- 工具库 ----------
-with tab_tools:
-    tools = requests.get(f"{API}/tools").json()
+# ---------- 工具库 Tab（fragment：切换工具只重跑本区域） ----------
+@st.fragment
+def render_tools_tab():
+    tools = api_get("/tools")
     names = [t["name"] for t in tools]
     tool_name = st.selectbox("选择工具", names)
     tool = next(t for t in tools if t["name"] == tool_name)
@@ -333,7 +486,7 @@ with tab_tools:
             for k in list(st.session_state.keys()):
                 if k.startswith(f"tool_{tool_name}_"):
                     del st.session_state[k]
-            st.rerun()
+            st.rerun(scope="fragment")
     else:
         st.caption("ℹ️ 该工具暂无预设用例，请手动填写输入")
 
@@ -361,16 +514,34 @@ with tab_tools:
             )
         st.json(r.json())
 
-# ---------- 测试工作流 ----------
-with tab_wf:
-    wfs = requests.get(f"{API}/workflows").json()
+
+# ---------- 工作流测试 Tab（fragment：切换工作流只重跑本区域） ----------
+@st.fragment
+def render_workflow_test_tab():
+    wfs = api_get("/workflows")
     wf_name = st.selectbox("选择工作流", list(wfs.keys()))
     st.json(wfs[wf_name])
 
-    text = st.text_area("输入文本 (会作为 data['text'] 传入)", key="wf_text")
+    sample = WORKFLOW_SAMPLES.get(wf_name, {})
+    if sample:
+        st.caption("💡 已载入该工作流的默认测试用例，可直接执行或按需修改")
+        if st.button("🔄 恢复默认用例", key="reset_wf_sample"):
+            for k in list(st.session_state.keys()):
+                if k.startswith(f"wf_{wf_name}_"):
+                    del st.session_state[k]
+            st.rerun(scope="fragment")
+    else:
+        st.caption("ℹ️ 该工作流暂无默认用例，请手动填写输入")
+
+    text = st.text_area(
+        "输入文本 (会作为 data['text'] 传入)",
+        value=sample.get("text", ""),
+        key=f"wf_{wf_name}_text",
+    )
     extra = st.text_input(
         "附加 data 字段（JSON，可选）",
-        key="wf_extra",
+        value=sample.get("extra", ""),
+        key=f"wf_{wf_name}_extra",
         placeholder='例如 {"path": "sales.xlsx", "question": "上海销售额前5"}',
     )
 
@@ -381,7 +552,7 @@ with tab_wf:
                 data.update(json.loads(extra))
             except Exception as e:
                 st.error(f"附加字段不是合法 JSON: {e}")
-                st.stop()
+                return
 
         with st.spinner("执行工作流中..."):
             r = requests.post(
@@ -391,10 +562,20 @@ with tab_wf:
             )
         st.json(r.json())
 
+
+tab_tools, tab_wf, tab_wf_edit, tab_route, tab_rag = st.tabs(
+    ["🔧 工具库", "🔀 工作流测试", "✏️ 工具库更新", "🚦 自动路由", "📚 文档问答"]
+)
+
+with tab_tools:
+    render_tools_tab()
+
+with tab_wf:
+    render_workflow_test_tab()
+
 # ---------- 修改工作流 ----------
 with tab_wf_edit:
-    wfs_resp = requests.get(f"{API}/workflows")
-    wfs = wfs_resp.json() if wfs_resp.status_code == 200 else {}
+    wfs = api_get("/workflows")
     names = sorted(wfs.keys())
 
     left, right = st.columns([1, 2])
@@ -425,6 +606,7 @@ with tab_wf_edit:
                         json={"yaml": template},
                     )
                     if r.status_code == 200:
+                        st.cache_data.clear()  # 写操作后失效缓存，保证列表即时更新
                         st.success(f"已创建 {new_name}")
                         st.rerun()
                     else:
@@ -439,8 +621,9 @@ with tab_wf_edit:
         if selected and st.button("🗑 删除当前工作流", key="btn_del_wf"):
             r = requests.delete(f"{API}/workflows/{selected}")
             if r.status_code == 200:
-                st.success(f"已删除 {selected}")
+                st.cache_data.clear()
                 st.session_state.pop(f"wf_yaml_{selected}", None)
+                st.success(f"已删除 {selected}")
                 st.rerun()
             else:
                 st.error(r.json().get("detail", r.text))
@@ -448,8 +631,7 @@ with tab_wf_edit:
         st.markdown("---")
         st.markdown("**可用工具**")
         try:
-            tools = requests.get(f"{API}/tools").json()
-            for t in tools:
+            for t in api_get("/tools"):
                 st.caption(f"`{t['name']}` — {t['description']}")
         except Exception:
             st.caption("(无法获取工具列表)")
@@ -457,41 +639,44 @@ with tab_wf_edit:
     # ---------- 右侧：YAML 编辑器 + 执行 ----------
     with right:
         if not selected:
-            st.stop()
+            st.info("请先在左侧选择或新建工作流。")
+        else:
+            st.markdown(f"### ✏️ 编辑 `{selected}`")
 
-        st.markdown(f"### ✏️ 编辑 `{selected}`")
+            try:
+                current_yaml = api_get(f"/workflows/{selected}/raw")["yaml"]
+            except Exception as e:
+                st.error(f"加载失败: {e}")
+                current_yaml = None
 
-        raw_resp = requests.get(f"{API}/workflows/{selected}/raw")
-        if raw_resp.status_code != 200:
-            st.error(f"加载失败: {raw_resp.text}")
-            st.stop()
-        current_yaml = raw_resp.json()["yaml"]
-
-        state_key = f"wf_yaml_{selected}"
-        edited = st.text_area(
-            "YAML 内容（可直接编辑）",
-            value=current_yaml,
-            height=420,
-            key=state_key,
-        )
-
-        c1, c2, c3 = st.columns([1, 1, 3])
-        with c1:
-            if st.button("💾 保存", key="btn_save_wf"):
-                r = requests.put(
-                    f"{API}/workflows/{selected}",
-                    json={"yaml": edited},
+            if current_yaml is not None:
+                state_key = f"wf_yaml_{selected}"
+                edited = st.text_area(
+                    "YAML 内容（可直接编辑）",
+                    value=current_yaml,
+                    height=420,
+                    key=state_key,
                 )
-                if r.status_code == 200:
-                    st.success("已保存")
-                else:
-                    st.error(r.json().get("detail", r.text))
-        with c2:
-            if st.button("🔄 重置", key="btn_reset_wf"):
-                st.session_state.pop(state_key, None)
-                st.rerun()
-        with c3:
-            st.caption("保存后立即生效；执行时按磁盘上的最新版本加载。")
+
+                c1, c2, c3 = st.columns([1, 1, 3])
+                with c1:
+                    if st.button("💾 保存", key="btn_save_wf"):
+                        r = requests.put(
+                            f"{API}/workflows/{selected}",
+                            json={"yaml": edited},
+                        )
+                        if r.status_code == 200:
+                            st.cache_data.clear()
+                            st.success("已保存")
+                            st.rerun()
+                        else:
+                            st.error(r.json().get("detail", r.text))
+                with c2:
+                    if st.button("🔄 重置", key="btn_reset_wf"):
+                        st.session_state.pop(state_key, None)
+                        st.rerun()
+                with c3:
+                    st.caption("保存后立即生效；执行时按磁盘上的最新版本加载。")
 
         # st.markdown("---")
         # st.markdown("### ▶ 执行工作流")

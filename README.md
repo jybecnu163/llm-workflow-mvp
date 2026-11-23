@@ -188,6 +188,26 @@ curl -X POST http://localhost:8000/run \
 
 纯本地零成本工具：`text_statistics`、`dedupe_lines`、`json_validator`、`yaml_validator`、`markdown_table`、`language_detect`、`cron_explainer(表达式分支)`。
 
+# 全工作流验证（35 个工作流）
+
+```bash
+.venv\Scripts\python.exe scripts\test_all_workflows.py   # 55 项断言应全部 PASS
+```
+
+- 35 个工作流覆盖全部 69 个工具，Streamlit「🔀 工作流测试」tab 每项均有默认测试用例，选择即自动填入，可一键「🔄 恢复默认用例」
+- 新增 15 个工作流：news_intelligence / content_seo_optimizer / knowledge_mindmap / decision_advisor / dev_delivery / proofread_professional / text_cleanup / tag_aggregation / prompt_lab / deck_builder / sql_analyst / novel_kb_builder / regex_assistant / format_validator / cron_helper
+
+# 前端交互性能说明
+
+工具库与工作流测试 tab 已启用 `@st.fragment` 局部刷新 + `@st.cache_data` 请求缓存：
+
+- 切换工具/工作流只重跑对应 tab，其他 tab 不执行
+- 只读请求（/health、/tools、/workflows）缓存 30 秒，不重复访问后端
+- 写操作（新建/删除/保存工作流）后自动失效缓存
+- 需要 Streamlit ≥ 1.37（当前环境 1.66.0）
+
+验证：`python -c "from streamlit.testing.v1 import AppTest; ..."` 可模拟切换，0 异常。
+
 # 下一步可扩展点
 
 工作流画布：把 YAML 换成 React Flow 可视化编辑，导出同样的 YAML。

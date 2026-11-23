@@ -260,33 +260,33 @@
 
 ## 附录 A：工具总览（本次新增 16 个）
 
-| 阶段 | 工具名 | 一句话功能 |
-|------|--------|-----------|
-| 一 | `polish_copy` | 文案润色（风格可选） |
-| 一 | `generate_hooks` | 爆款标题生成 |
-| 一 | `rewrite_style` | 风格迁移 |
-| 一 | `expand_article` | 内容扩写 |
-| 二 | `meeting_notes` ⭐ | 会议纪要结构化 |
-| 二 | `task_extractor` | 待办提取 |
-| 二 | `email_compose` | 邮件撰写 |
-| 二 | `slide_outline` | PPT大纲生成 |
-| 三 | `feynman_explain` | 费曼讲解器 |
-| 三 | `mindmap_outline` | 思维导图大纲 |
-| 三 | `generate_quiz` ⭐ | 智能出题 |
-| 三 | `flashcards` | 记忆卡片 |
-| 四 | `prompt_doctor` | Prompt 优化 |
-| 四 | `tool_matchmaker` | 工具推荐 |
-| 四 | `workflow_advisor` | 工作流诊断 |
-| 四 | `result_critic` | 结果评审 |
+| 阶段 | 工具名                | 一句话功能      |
+|----|--------------------|------------|
+| 一  | `polish_copy`      | 文案润色（风格可选） |
+| 一  | `generate_hooks`   | 爆款标题生成     |
+| 一  | `rewrite_style`    | 风格迁移       |
+| 一  | `expand_article`   | 内容扩写       |
+| 二  | `meeting_notes` ⭐  | 会议纪要结构化    |
+| 二  | `task_extractor`   | 待办提取       |
+| 二  | `email_compose`    | 邮件撰写       |
+| 二  | `slide_outline`    | PPT大纲生成    |
+| 三  | `feynman_explain`  | 费曼讲解器      |
+| 三  | `mindmap_outline`  | 思维导图大纲     |
+| 三  | `generate_quiz` ⭐  | 智能出题       |
+| 三  | `flashcards`       | 记忆卡片       |
+| 四  | `prompt_doctor`    | Prompt 优化  |
+| 四  | `tool_matchmaker`  | 工具推荐       |
+| 四  | `workflow_advisor` | 工作流诊断      |
+| 四  | `result_critic`    | 结果评审       |
 
 ## 附录 B：工作流总览（本次新增 4 个）
 
-| 工作流名 | 串联工具 |
-|----------|----------|
-| `content_factory` | generate_hooks → expand_article → rewrite_style → polish_copy |
-| `study_buddy` | rag_search → feynman_explain → generate_quiz → flashcards |
-| `meeting_secretary` | meeting_notes → task_extractor → write_db → email_compose |
-| `support_qa` | classify_email → sentiment_aspect → result_critic → alert_ops |
+| 工作流名                | 串联工具                                                          |
+|---------------------|---------------------------------------------------------------|
+| `content_factory`   | generate_hooks → expand_article → rewrite_style → polish_copy |
+| `study_buddy`       | rag_search → feynman_explain → generate_quiz → flashcards     |
+| `meeting_secretary` | meeting_notes → task_extractor → write_db → email_compose     |
+| `support_qa`        | classify_email → sentiment_aspect → result_critic → alert_ops |
 
 ## 附录 C：推荐执行顺序（时间线）
 
@@ -616,40 +616,40 @@ Day 6: 任务 21-23 （验证 + 文档收尾）
 
 ## 附录 D：批次二工具总览（新增 23 个）
 
-| 阶段 | 工具名 | 一句话功能 | 类型 |
-|------|--------|-----------|------|
-| 七 | `text_statistics` ⭐ | 文本统计（纯本地） | 本地 |
-| 七 | `keyword_extractor` | 关键词提取 | LLM |
-| 七 | `extract_table` | 表格抽取为 JSON | LLM |
-| 七 | `text_to_json` | 按自定义字段转 JSON | LLM |
-| 七 | `dedupe_lines` | 文本行去重（纯本地） | 本地 |
-| 八 | `json_validator` ⭐ | JSON 校验格式化 | 本地 |
-| 八 | `yaml_validator` | YAML 校验转 JSON | 本地 |
-| 八 | `regex_generator` | 正则生成器 | LLM |
-| 八 | `cron_explainer` | Cron 表达式互转 | 混合 |
-| 八 | `markdown_table` | JSON 转 Markdown 表格 | 本地 |
-| 九 | `code_review` ⭐ | 代码审查 | LLM |
-| 九 | `explain_code` | 代码解释 | LLM |
-| 九 | `sql_generator` | 自然语言转 SQL | LLM |
-| 九 | `generate_test_cases` | 测试用例生成 | LLM |
-| 九 | `commit_message` | Commit Message 生成 | LLM |
-| 十 | `pros_cons` | 利弊分析 | LLM |
-| 十 | `swot_analysis` | SWOT 分析 | LLM |
-| 十 | `priority_matrix` ⭐ | 优先级四象限 | LLM |
-| 十 | `risk_assessment` | 风险评估 | LLM |
-| 十一 | `hashtag_generator` | 话题标签生成 | LLM |
-| 十一 | `readability_check` | 可读性评分 | 混合 |
-| 十一 | `seo_keywords` | SEO 关键词布局 | LLM |
-| 十一 | `language_detect` | 语言检测 | 本地 |
+| 阶段 | 工具名                   | 一句话功能              | 类型  |
+|----|-----------------------|--------------------|-----|
+| 七  | `text_statistics` ⭐   | 文本统计（纯本地）          | 本地  |
+| 七  | `keyword_extractor`   | 关键词提取              | LLM |
+| 七  | `extract_table`       | 表格抽取为 JSON         | LLM |
+| 七  | `text_to_json`        | 按自定义字段转 JSON       | LLM |
+| 七  | `dedupe_lines`        | 文本行去重（纯本地）         | 本地  |
+| 八  | `json_validator` ⭐    | JSON 校验格式化         | 本地  |
+| 八  | `yaml_validator`      | YAML 校验转 JSON      | 本地  |
+| 八  | `regex_generator`     | 正则生成器              | LLM |
+| 八  | `cron_explainer`      | Cron 表达式互转         | 混合  |
+| 八  | `markdown_table`      | JSON 转 Markdown 表格 | 本地  |
+| 九  | `code_review` ⭐       | 代码审查               | LLM |
+| 九  | `explain_code`        | 代码解释               | LLM |
+| 九  | `sql_generator`       | 自然语言转 SQL          | LLM |
+| 九  | `generate_test_cases` | 测试用例生成             | LLM |
+| 九  | `commit_message`      | Commit Message 生成  | LLM |
+| 十  | `pros_cons`           | 利弊分析               | LLM |
+| 十  | `swot_analysis`       | SWOT 分析            | LLM |
+| 十  | `priority_matrix` ⭐   | 优先级四象限             | LLM |
+| 十  | `risk_assessment`     | 风险评估               | LLM |
+| 十一 | `hashtag_generator`   | 话题标签生成             | LLM |
+| 十一 | `readability_check`   | 可读性评分              | 混合  |
+| 十一 | `seo_keywords`        | SEO 关键词布局          | LLM |
+| 十一 | `language_detect`     | 语言检测               | 本地  |
 
 ## 附录 E：批次二工作流总览（新增 4 个）
 
-| 工作流名 | 串联工具 |
-|----------|----------|
-| `data_cleaning_pipeline` | extract_table → json_validator → text_to_json → markdown_table |
-| `smart_meeting_upgrade` | meeting_notes → task_extractor → priority_matrix → email_compose |
-| `code_review_assistant` | code_review → explain_code → generate_test_cases → result_critic |
-| `rag_enhanced_search` | keyword_extractor → rag_rewrite_query → rag_answer_v2 |
+| 工作流名                     | 串联工具                                                             |
+|--------------------------|------------------------------------------------------------------|
+| `data_cleaning_pipeline` | extract_table → json_validator → text_to_json → markdown_table   |
+| `smart_meeting_upgrade`  | meeting_notes → task_extractor → priority_matrix → email_compose |
+| `code_review_assistant`  | code_review → explain_code → generate_test_cases → result_critic |
+| `rag_enhanced_search`    | keyword_extractor → rag_rewrite_query → rag_answer_v2            |
 
 ## 附录 F：批次二推荐执行顺序（时间线）
 

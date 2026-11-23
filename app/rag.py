@@ -204,18 +204,30 @@ RAG_SYSTEM = "你是文档问答助手。只根据用户提供的文档片段回
 
 async def answer_question(question: str, top_k: int = RAG_TOP_K) -> dict:
     chunks = await search(question, top_k=top_k)
+    return await _answer_with_chunks(question, chunks)
 
+
+async def _answer_with_chunks(question: str, chunks: list[dict], extra: dict | None = None) -> dict:
+    """基于给定的检索片段生成答案（rag_answer_v2 多路检索后复用）。
+
+    extra 中的字段会合并进返回值，例如 {"rewritten": [...]}。
+    """
     if not chunks:
         return {
             "answer": "知识库为空或没有检索到相关内容。请先上传文档，或换个问法。",
             "sources": [],
             "chunks_used": 0,
+            **(extra or {}),
         }
 
     context_parts = []
     for i, c in enumerate(chunks, 1):
+        page = c.get("page", 0)
+        source = c.get("source", "")
+        chapter = c.get("chapter")
+        loc = f"第 {chapter} 回" if chapter else f"第 {page} 页"
         context_parts.append(
-            f"[片段 {i}] 来源: {c['source']} 第 {c['page']} 页\n{c['text']}"
+            f"[片段 {i}] 来源: {source} {loc}\n{c.get('text', '')}"
         )
     context = "\n\n".join(context_parts)
 
@@ -240,19 +252,20 @@ async def answer_question(question: str, top_k: int = RAG_TOP_K) -> dict:
     seen = set()
     sources = []
     for c in chunks:
-        key = (c["source"], c["page"])
+        key = (c.get("source", ""), c.get("page", 0))
         if key not in seen:
             seen.add(key)
             sources.append({
-                "source": c["source"],
-                "page": c["page"],
-                "score": c["score"],
+                "source": c.get("source", ""),
+                "page": c.get("page", 0),
+                "score": c.get("score", 0),
             })
 
     return {
         "answer": answer.strip(),
         "sources": sources,
         "chunks_used": len(chunks),
+        **(extra or {}),
     }
 
 

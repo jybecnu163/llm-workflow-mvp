@@ -511,7 +511,14 @@ async def correct_text(inputs: dict) -> dict:
 async def verify_correction(inputs: dict) -> dict:
     import difflib
     original = inputs.get("text", "")
-    corrected = inputs.get("corrected", "") or original
+    # 支持 input_from：优先取上游指定的 corrected/final 字段
+    src = inputs.get("input_from")
+    corrected = ""
+    if src:
+        corrected = inputs.get(src) or ""
+        if isinstance(corrected, dict):
+            corrected = corrected.get("corrected") or corrected.get("final") or ""
+    corrected = corrected or inputs.get("corrected", "") or inputs.get("final", "") or original
 
     ratio = difflib.SequenceMatcher(None, original, corrected).ratio()
     # 相似度低于 0.85 视为改动过大，回退原文
@@ -584,7 +591,24 @@ def _load_df(path: Path) -> pd.DataFrame:
 def _df_records(df: pd.DataFrame, n: int) -> list[dict]:
     sub = df.head(n).copy().astype(object)
     sub = sub.where(pd.notna(sub), None)
-    return sub.to_dict(orient="records")
+
+    def jsonable(v):
+        if v is None:
+            return None
+        if hasattr(v, "isoformat"):  # pandas Timestamp / datetime / date
+            return v.isoformat()
+        if isinstance(v, (list, tuple)):
+            return [jsonable(x) for x in v]
+        if isinstance(v, dict):
+            return {str(k): jsonable(x) for k, x in v.items()}
+        try:
+            json.dumps(v)
+            return v
+        except (TypeError, ValueError):
+            return str(v)
+
+    return [{k: jsonable(v) for k, v in row.items()}
+            for row in sub.to_dict(orient="records")]
 
 
 def _apply_operations(df: pd.DataFrame, ops: list[dict]) -> tuple[pd.DataFrame, list[dict]]:
@@ -1789,6 +1813,23 @@ async def cron_explainer(inputs: dict) -> dict:
 )
 async def markdown_table(inputs: dict) -> dict:
     rows = inputs.get("rows") or []
+    # 支持 input_from：从上游任意输出键读取数组/dict/JSON 字符串
+    src = inputs.get("input_from")
+    if not rows and src:
+        v = inputs.get(src)
+        if isinstance(v, list):
+            if all(isinstance(x, dict) for x in v):
+                rows = v
+            else:
+                rows = [{"item": str(x)} for x in v]
+        elif isinstance(v, dict):
+            rows = [{k: val} for k, val in v.items()]
+        elif isinstance(v, str):
+            parsed = _safe_json(v, {})
+            if isinstance(parsed, list):
+                rows = parsed
+            elif isinstance(parsed, dict):
+                rows = [parsed]
     if not isinstance(rows, list):
         single = inputs.get("text")
         rows = _safe_json(single, {}).get("data", []) if single else []
